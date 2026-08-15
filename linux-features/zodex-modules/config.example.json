@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "oauth": {
+    "brokers": {
+      "omniroute": {
+        "enabled": false,
+        "providers": {
+          "anthropic": {
+            "enabled": false,
+            "acknowledgements": []
+          },
+          "google": {
+            "enabled": false,
+            "acknowledgements": []
+          }
+        }
+      },
+      "opencode-community": {
+        "enabled": false,
+        "providers": {}
+      }
+    }
+  },
+  "remoteControl": {
+    "enabled": false,
+    "extensions": []
+  }
+}

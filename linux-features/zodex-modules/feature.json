@@ -1,0 +1,21 @@
+{
+  "id": "zodex-modules",
+  "title": "Zodex Modules",
+  "description": "Config-file-only Zodex module host and two-step OAuth broker warnings.",
+  "defaultEnabled": false,
+  "entrypoints": {
+    "patchDescriptors": "./patch.js"
+  },
+  "resources": [
+    {
+      "source": "config.js",
+      "target": ".codex-linux/features/zodex-modules/config.js",
+      "mode": "0644"
+    },
+    {
+      "source": "config.example.json",
+      "target": ".codex-linux/features/zodex-modules/config.example.json",
+      "mode": "0644"
+    }
+  ]
+}
