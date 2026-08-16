@@ -15,7 +15,11 @@ fi
 INSTALL_DIR="${CODEX_INSTALL_DIR:-$INSTALL_ROOT/$DEFAULT_INSTALL_DIR_NAME}"
 WORK_DIR="$(mktemp -d)"
 ARCH="${CODEX_TARGET_ARCH:-$(uname -m)}"
-ICON_SOURCE="$SCRIPT_DIR/assets/codex-linux.png"
+ICON_SOURCE="${CODEX_APP_ICON_SOURCE:-$SCRIPT_DIR/assets/codex-linux.png}"
+case "$ICON_SOURCE" in
+    /*) ;;
+    *) ICON_SOURCE="$SCRIPT_DIR/$ICON_SOURCE" ;;
+esac
 
 . "$SCRIPT_DIR/scripts/lib/install-helpers.sh"
 . "$SCRIPT_DIR/scripts/lib/process-detection.sh"
@@ -92,11 +96,10 @@ create_start_script() {
 }
 
 stage_community_branding() {
+    [ -f "$ICON_SOURCE" ] || error "Missing app icon: $ICON_SOURCE"
     mkdir -p "$INSTALL_DIR/.codex-linux"
-    if [ -f "$ICON_SOURCE" ]; then
-        cp "$ICON_SOURCE" "$INSTALL_DIR/.codex-linux/$CODEX_APP_ID.png"
-        cp "$ICON_SOURCE" "$INSTALL_DIR/resources/icon-chatgpt.png"
-    fi
+    cp "$ICON_SOURCE" "$INSTALL_DIR/.codex-linux/$CODEX_APP_ID.png"
+    cp "$ICON_SOURCE" "$INSTALL_DIR/resources/icon-chatgpt.png"
 }
 
 verify_clean_asar_preserved() {

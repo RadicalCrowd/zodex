@@ -1,3 +1,23 @@
+<h1 align="center">Zodex</h1>
+
+这是基于
+[`ilysenko/codex-desktop-linux`](https://github.com/ilysenko/codex-desktop-linux)
+的 Arch 优先 Zodex 开发分支。它保留 OpenAI 已签名的官方 Linux payload
+以及原生 Codex/ChatGPT 登录，并加入默认关闭的 `zodex-modules` 边界和独立的
+`zodex` 应用、桌面入口、软件包与图标身份。
+
+以下命令只构建不含 updater 的隔离 Arch 验收候选，不会安装软件包或重启当前应用：
+
+```bash
+./scripts/build-zodex-arch-candidate.sh
+```
+
+在 updater 的所有路径和服务完成独立命名空间之前，Zodex 会刻意省略 updater。
+Provider 凭据不会写入 Zodex JSON 配置。详情请参阅
+[`linux-features/zodex-modules/README.md`](linux-features/zodex-modules/README.md)。
+
+## 上游 Linux port 文档
+
 <h1 align="center">ChatGPT Community for Linux</h1>
 
 <p align="center">

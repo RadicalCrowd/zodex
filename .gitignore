@@ -14,6 +14,7 @@ codex-app-next/
 .codex-app-next.promotion.json
 .codex-app-next.promotion.lock
 zodex-app-next/
+zodex-app-next.backup-*/
 .zodex-app-next.candidate-*/
 .zodex-app-next.promotion.json
 .zodex-app-next.promotion.lock

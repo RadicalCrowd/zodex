@@ -12,20 +12,28 @@ assert_absent() { ! rg -q -- "$2" "$1" || fail "$1 unexpectedly contains $2"; }
 
 assert_executable install.sh
 assert_executable scripts/rebuild-candidate.sh
+assert_executable scripts/build-zodex-arch-candidate.sh
 assert_executable scripts/select-latest-package.sh
 assert_executable scripts/ci/update-nix-hashes.sh
 assert_executable scripts/ci/validate-nix-pins.sh
 assert_file assets/openai-codex-linux-repository-key.gpg.base64
 assert_file nix/upstream-linux-packages.json
 
-bash -n install.sh launcher/start.sh.template scripts/rebuild-candidate.sh scripts/select-latest-package.sh
+bash -n install.sh launcher/start.sh.template scripts/rebuild-candidate.sh scripts/build-zodex-arch-candidate.sh scripts/select-latest-package.sh
 bash -n scripts/lib/*.sh scripts/build-deb.sh scripts/build-rpm.sh scripts/build-pacman.sh scripts/build-appimage.sh
 
 assert_contains packaging/linux/codex-desktop.desktop '^Name=ChatGPT Community$'
 assert_contains packaging/linux/codex-desktop.desktop '^Comment=Community Linux distribution based on OpenAI ChatGPT$'
 assert_contains install.sh 'CODEX_APP_DISPLAY_NAME:-ChatGPT Community'
+assert_contains install.sh 'CODEX_APP_ICON_SOURCE:-.*assets/codex-linux.png'
+assert_contains install.sh 'Missing app icon:'
 assert_contains install.sh 'cp .*ICON_SOURCE.*CODEX_APP_ID'
 assert_contains install.sh 'cp .*ICON_SOURCE.*resources/icon-chatgpt.png'
+assert_contains scripts/build-zodex-arch-candidate.sh '^CODEX_APP_ID=zodex'
+assert_contains scripts/build-zodex-arch-candidate.sh '^PACKAGE_NAME=zodex'
+assert_contains scripts/build-zodex-arch-candidate.sh '^PACKAGE_WITH_UPDATER=0'
+assert_absent scripts/build-zodex-arch-candidate.sh 'rebuild-candidate\.sh --install'
+assert_absent scripts/build-zodex-arch-candidate.sh 'make install'
 assert_contains scripts/lib/package-common.sh 'PACKAGE_DISPLAY_NAME:-ChatGPT Community'
 assert_contains scripts/build-appimage.sh 'PACKAGE_DISPLAY_NAME:-ChatGPT Community'
 assert_contains install.sh 'upstream-linux-package.sh'

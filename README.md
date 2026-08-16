@@ -1,3 +1,25 @@
+<h1 align="center">Zodex</h1>
+
+This is the Arch-first Zodex development fork of
+[`ilysenko/codex-desktop-linux`](https://github.com/ilysenko/codex-desktop-linux).
+It adds the disabled `zodex-modules` warning/module boundary and a distinct
+`zodex` app, desktop, package, and icon identity while preserving the signed
+official Linux payload and native Codex/ChatGPT authentication.
+
+Build an isolated, updater-free Arch acceptance candidate without installing
+or restarting the current app:
+
+```bash
+./scripts/build-zodex-arch-candidate.sh
+```
+
+The updater is deliberately omitted until all updater paths and services are
+separately namespaced. Provider authentication and secrets are never stored in
+the Zodex JSON configuration. See
+[`linux-features/zodex-modules/README.md`](linux-features/zodex-modules/README.md).
+
+## Upstream Linux-port documentation
+
 <h1 align="center">ChatGPT Community for Linux</h1>
 
 <p align="center">
