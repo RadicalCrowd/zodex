@@ -17,6 +17,10 @@ PATH` byte tunnel and its existing WebSocket transport. Other local clients use
 the same stock proxy command to attach to the Unix socket and receive the normal
 WebSocket `/rpc` byte stream. Closing Desktop stops the authority.
 
+The launcher uses the official CLI bundled in `resources/codex` by default.
+An explicit `CODEX_CLI_PATH` remains supported and is preserved by the feature
+hook.
+
 The default socket is scoped by Linux app id under `XDG_RUNTIME_DIR`, preventing
 side-by-side Desktop instances from sharing an authority accidentally. Override
 it with `CODEX_LINUX_APP_SERVER_BRIDGE_SOCKET` when a stable path is required.
@@ -27,10 +31,25 @@ control endpoint and must not be exposed directly over TCP or forwarded as a
 network service.
 
 Authority startup is serialized by an owner-only lock next to the socket. The
-feature fails closed if either path already exists; it never guesses that an
-existing socket or lock is stale. After an abnormal Desktop termination, verify
-that no authority still owns the configured endpoint before removing stale
-paths and restarting Desktop.
+lock records the owning Linux process identity, so a later Desktop launch can
+reclaim it only when that exact process no longer exists. An existing socket is
+probed before recovery: connectable endpoints and live or unverifiable owners
+still fail closed, while an unbound socket inode from the dead owner is removed
+only if its filesystem identity is unchanged.
+Legacy locks without owner metadata remain protected for 15 seconds, longer
+than the authority startup timeout, before they can be reclaimed when no socket
+exists.
+
+The launcher also cleans up a live authority orphaned by a terminated Desktop
+process. Cleanup is limited to a same-user `codex app-server --listen unix://PATH`
+process serving the exact locked socket after direct PID 1 adoption or adoption
+by a verified same-user `systemd --user` manager whose own parent is PID 1. Once
+the authority is ready, its PID and process-start identity are recorded in the
+ownership lock. The lock owner, socket inode, listener identity, command line,
+and process start identities are rechecked before signaling it. Unknown
+listeners, live Desktop owners, changed identities, and pathnames with multiple
+live listener inodes remain untouched. The same cleanup runs after Electron exits
+and before a later cold start.
 
 ## SSH setup
 

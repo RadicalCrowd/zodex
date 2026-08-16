@@ -4,9 +4,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const {
-  PATCH_STATUS_FAILED_REQUIRED,
-  patchStatusFromChange,
-  recordPatch,
 } = require("../lib/patch-report.js");
 const {
   detectLinuxTargetContext,
@@ -17,45 +14,31 @@ const {
   enabledLinuxFeatureIds,
 } = require("../lib/linux-features.js");
 const {
-  findIconAsset,
   findMainBundle,
 } = require("./lib/assets.js");
 const {
   applyExtractedAppPatchDescriptors,
   applyMainBundlePatchDescriptors,
   applyWebviewAssetPatchDescriptors,
-  discoverCorePatchDescriptors,
   normalizePatchDescriptors,
+  recordUnavailablePhasePatchDescriptors,
 } = require("./engine.js");
 const {
   PHASE_EXTRACTED_APP_POST_WEBVIEW,
   PHASE_EXTRACTED_APP_PRE_WEBVIEW,
   PHASE_MAIN_BUNDLE,
 } = require("./descriptor.js");
-const {
-  isComputerUseUiEnabled,
-} = require("./impl/computer-use.js");
 
 const REQUIRED_UPSTREAM = "required-upstream";
 const OPTIONAL = "optional";
 const OPT_IN = "opt-in";
 const CORE_PATCH_ROOT = path.join(__dirname, "core");
 
-const CUSTOM_PATCH_POLICIES = [
-  { name: "main-process-ui", ciPolicy: REQUIRED_UPSTREAM, phase: "main-bundle" },
-];
-
-function recordMainProcessUiPatch(report, status, reason = null) {
-  recordPatch(report, "main-process-ui", status, reason, {
-    phase: "main-bundle",
-    ciPolicy: REQUIRED_UPSTREAM,
-    sourceKind: "core",
-  });
-}
+const CUSTOM_PATCH_POLICIES = [];
 
 function normalizeDiscoveredCorePatchDescriptors(options = {}) {
-  const root = options.corePatchRoot ?? CORE_PATCH_ROOT;
-  return normalizePatchDescriptors(discoverCorePatchDescriptors({ root }));
+  void options;
+  return [];
 }
 
 function corePatchDescriptors(options = {}) {
@@ -70,20 +53,23 @@ function featurePatchOptions(options = {}) {
   return {
     ...(options.featuresRoot != null ? { featuresRoot: options.featuresRoot } : {}),
     ...(options.featuresConfigPath != null ? { featuresConfigPath: options.featuresConfigPath } : {}),
+    ...(options.internalFeatureIds != null ? { internalFeatureIds: options.internalFeatureIds } : {}),
   };
 }
 
 function createMainBundleContext(iconAsset, options = {}) {
   const linux = options.linuxTarget ?? detectLinuxTargetContext(options.linuxTargetOptions);
+  const currentFeaturePatchOptions = featurePatchOptions(options);
+  const enabledFeatureIds = options.enabledFeatureIds ??
+    enabledLinuxFeatureIds(currentFeaturePatchOptions);
   return {
-    enableComputerUseUi: isComputerUseUiEnabled(),
+    enableComputerUseUi: enabledFeatureIds.includes("computer-use-linux"),
+    enabledFeatureIds: [...enabledFeatureIds],
     iconAsset,
-    iconPathExpression:
-      iconAsset == null ? null : `process.resourcesPath+\`/../content/webview/assets/${iconAsset}\``,
     linux,
     linuxTarget: linux,
     corePatchRoot: options.corePatchRoot,
-    featurePatchOptions: featurePatchOptions(options),
+    featurePatchOptions: currentFeaturePatchOptions,
   };
 }
 
@@ -114,7 +100,8 @@ function mainBundlePatchDescriptors(context) {
 }
 
 function applyMainBundlePatches(source, context, report) {
-  return applyMainBundlePatchDescriptors(source, mainBundlePatchDescriptors(context), context, report);
+  const descriptors = mainBundlePatchDescriptors(context);
+  return applyMainBundlePatchDescriptors(source, descriptors, context, report);
 }
 
 function patchMainBundleSource(source, iconAsset, options = {}) {
@@ -132,7 +119,7 @@ function patchExtractedApp(extractedDir, options = {}) {
 
   setReportLinuxTarget(report, baseContext.linux);
   if (report != null) {
-    report.enabledFeatures = enabledLinuxFeatureIds(featuresOptions);
+    report.enabledFeatures = [...baseContext.enabledFeatureIds];
   }
 
   const main = findMainBundle(extractedDir);
@@ -140,47 +127,36 @@ function patchExtractedApp(extractedDir, options = {}) {
     report.mainBundle = main?.mainBundle ?? null;
     report.target = main == null ? null : path.join(main.buildDir, main.mainBundle);
   }
-  if (main == null) {
+  if (main == null && patchDescriptors.some((descriptor) => descriptor.phase === PHASE_MAIN_BUNDLE)) {
     const reason = `Could not find main bundle in ${path.join(extractedDir, ".vite", "build")}`;
-    console.warn(`WARN: ${reason} — skipping main-process UI patches`);
-    recordMainProcessUiPatch(report, PATCH_STATUS_FAILED_REQUIRED, reason);
-  }
-
-  const iconAsset = findIconAsset(extractedDir);
-  if (report != null) {
-    report.iconAsset = iconAsset;
-  }
-  if (iconAsset == null) {
-    console.warn(
-      `WARN: Could not find app icon asset in ${path.join(extractedDir, "webview", "assets")} — skipping icon patches`,
+    console.warn(`WARN: ${reason} — skipping enabled main-bundle feature patches`);
+    recordUnavailablePhasePatchDescriptors(
+      patchDescriptors,
+      PHASE_MAIN_BUNDLE,
+      baseContext,
+      report,
+      reason,
     );
   }
 
+  const iconAsset = null;
+  if (report != null) {
+    report.iconAsset = iconAsset;
+  }
   const assetContext = createMainBundleContext(iconAsset, {
     ...options,
+    enabledFeatureIds: baseContext.enabledFeatureIds,
     linuxTarget: baseContext.linux,
   });
   assetContext.report = report;
 
-  if (main != null) {
+  if (main != null && patchDescriptors.some((descriptor) => descriptor.phase === PHASE_MAIN_BUNDLE)) {
     const target = path.join(main.buildDir, main.mainBundle);
     const source = fs.readFileSync(target, "utf8");
-    const { patchedSource, requiredCoreWarnings } = applyMainBundlePatches(source, assetContext, report);
+    const { patchedSource } = applyMainBundlePatches(source, assetContext, report);
     if (patchedSource !== source) {
       fs.writeFileSync(target, patchedSource, "utf8");
     }
-    recordPatch(
-      report,
-      "main-process-ui",
-      patchStatusFromChange(patchedSource !== source, requiredCoreWarnings, REQUIRED_UPSTREAM),
-      requiredCoreWarnings[0] ?? null,
-      {
-        phase: "main-bundle",
-        ciPolicy: REQUIRED_UPSTREAM,
-        sourceKind: "core",
-        ...(requiredCoreWarnings.length > 0 ? { warnings: [...requiredCoreWarnings] } : {}),
-      },
-    );
   }
 
   applyExtractedAppPatchDescriptors(
@@ -206,12 +182,11 @@ function patchExtractedApp(extractedDir, options = {}) {
     PHASE_EXTRACTED_APP_POST_WEBVIEW,
   );
 
-  const desktopName = assetContext.desktopName ?? report?.desktopName ?? null;
-  console.log("Patched Linux window, shell, and appearance behavior:", {
+  console.log("Applied enabled Linux feature descriptors:", {
     target: main == null ? null : path.join(main.buildDir, main.mainBundle),
     mainBundle: main?.mainBundle ?? null,
     iconAsset,
-    desktopName,
+    featureCount: baseContext.enabledFeatureIds.length,
   });
 }
 
@@ -238,8 +213,8 @@ function requiredPatchNamesForProfile(profile, options = {}) {
     return [];
   }
   const linux = options.linuxTarget ?? detectLinuxTargetContext(options.linuxTargetOptions);
-  const context = { linux, linuxTarget: linux, enableComputerUseUi: isComputerUseUiEnabled() };
-  return allPatchPolicies({ corePatchRoot: options.corePatchRoot })
+  const context = { linux, linuxTarget: linux, enableComputerUseUi: false };
+  return allPatchPolicies(options)
     .filter((patch) => patch.ciPolicy === REQUIRED_UPSTREAM)
     .filter((patch) => patch.appliesTo == null || patch.appliesTo(context) !== false)
     .map((patch) => patch.name);

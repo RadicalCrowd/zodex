@@ -18,13 +18,19 @@ const {
 } = require("./patch.js");
 
 const currentProjectSource = [
-  "function ue(e,t){let n=new Map(t.map((e,t)=>[e,t]));return[...e].sort((e,t)=>(n.get(e.projectId)??2**53-1)-(n.get(t.projectId)??2**53-1))}",
-  "function Re(e,t){let n=e.projectUpdatedAt??0;for(let r of e.threadKeys)n=Math.max(n,t.get(r)??0);return n}",
-  "function Fe({groups:e,items:t,projectOrder:n}){let r=new Map(t.map(e=>[e.task.key,e.recencyAt]));return ue(e.map((e,t)=>({group:e,index:t,recencyAt:Re(e,r)})).sort((e,t)=>t.recencyAt-e.recencyAt||e.index-t.index).map(({group:e})=>e),n)}",
+  "function U6i(e,t){let n=new Set(e.map(e=>e.projectId)),r=(t??[]).filter(e=>n.has(e)),i=new Set(r);return[...e.map(e=>e.projectId).filter(e=>!i.has(e)),...r]}",
+  "function G6i(e,t){let n=U6i(e,t),r=new Map(n.map((e,t)=>[e,t]));return[...e].sort((e,t)=>(r.get(e.projectId)??2**53-1)-(r.get(t.projectId)??2**53-1))}",
+  "function p5o({groups:e,items:t,projectOrder:n}){let r=new Map(t.map(e=>[e.task.key,e.recencyAt]));return G6i(e.map((e,t)=>({group:e,index:t,recencyAt:e.threadKeys.reduce((e,t)=>Math.max(e,r.get(t)??0),e.projectUpdatedAt??0)})).sort((e,t)=>t.recencyAt-e.recencyAt||e.index-t.index).map(({group:e})=>e),n)}",
   "const prioritySortId=`sidebarElectron.sortMenu.priority`;",
   "const updatedSortId=`sidebarElectron.sortMenu.updated`;",
   "const manualSortId=`sidebarElectron.sortMenu.manual`;",
-  "T=Fe({groups:Pe({groups:S,items:c}),items:c,projectOrder:f(t,o.PROJECT_ORDER)});",
+  "let{chatSortMode:j,projectSortMode:M}=t(xH),N=p5o({groups:A,items:f,projectOrder:jm(t,_u.PROJECT_ORDER)});",
+].join("");
+
+const officialLinuxProjectSource = [
+  "function A6i(e,t){return e}",
+  "function O8o({groups:e,items:t,projectOrder:n}){let r=new Map(t.map(e=>[e.task.key,e.recencyAt]));return A6i(e.map((e,t)=>({group:e,index:t,recencyAt:e.threadKeys.reduce((e,t)=>Math.max(e,r.get(t)??0),e.projectUpdatedAt??0)})).sort((e,t)=>t.recencyAt-e.recencyAt||e.index-t.index).map(({group:e})=>e),n)}",
+  "let{chatSortMode:j,projectSortMode:M}=t(IH),N=O8o({groups:A,items:f,projectOrder:Dm(t,yu.PROJECT_ORDER)});",
 ].join("");
 
 function captureWarns(fn) {
@@ -70,7 +76,7 @@ function withFeatureConfig(enabled, fn) {
 function evaluateGroupSorter(source) {
   const context = {};
   const sorterSource = source.slice(0, source.indexOf("const prioritySortId"));
-  vm.runInNewContext(`${sorterSource};globalThis.sortProjectGroups=Fe`, context);
+  vm.runInNewContext(`${sorterSource};globalThis.sortProjectGroups=p5o`, context);
   return context.sortProjectGroups;
 }
 
@@ -154,15 +160,28 @@ test("patch passes the selected project sort mode into the group sorter", () => 
   const patched = applyPatchTwice(currentProjectSource);
   assert.ok(
     patched.includes(
-      "projectOrder:f(t,o.PROJECT_ORDER),sortMode:t(C).projectSortMode",
+      "projectOrder:jm(t,_u.PROJECT_ORDER),sortMode:M",
     ),
+  );
+});
+
+test("patch matches the official 26.803.81509 project sorter semantically", () => {
+  const patched = applyPatchTwice(officialLinuxProjectSource);
+
+  assert.match(
+    patched,
+    /function O8o\(\{groups:e,items:t,projectOrder:n,sortMode:codexLinuxProjectSortMode\}\)/,
+  );
+  assert.match(
+    patched,
+    /O8o\(\{groups:A,items:f,projectOrder:Dm\(t,yu\.PROJECT_ORDER\),sortMode:M\}\)/,
   );
 });
 
 test("drift leaves the asset byte-identical", () => {
   const source = currentProjectSource.replace(
-    "function Fe({groups:e,items:t,projectOrder:n})",
-    "function Fe({groups:e,items:t,projectOrder:n,unknown:o})",
+    "function p5o({groups:e,items:t,projectOrder:n})",
+    "function p5o({groups:e,items:t,projectOrder:n,unknown:o})",
   );
   const { value, warnings } = captureWarns(() =>
     applyProjectGroupLastUpdatedSortPatch(source),
@@ -175,7 +194,7 @@ test("drift leaves the asset byte-identical", () => {
 
 test("missing current call site leaves the asset byte-identical", () => {
   const source = currentProjectSource.replace(
-    "projectOrder:f(t,o.PROJECT_ORDER)",
+    "projectOrder:jm(t,_u.PROJECT_ORDER)",
     "projectOrder:unknownProjectOrder",
   );
   const { value, warnings } = captureWarns(() =>
@@ -208,7 +227,7 @@ test("descriptor targets and patches only the current project sidebar chunk", ()
     const assetsDir = path.join(tempDir, "webview", "assets");
     const assetPath = path.join(
       assetsDir,
-      "app-initial~app-main~onboarding-page~projects-index-page~quick-chat-window-page~codex-micro~iqsnin5k-demo.js",
+      "app-initial-Biw83Aiz.js",
     );
     fs.mkdirSync(assetsDir, { recursive: true });
     fs.writeFileSync(assetPath, currentProjectSource);

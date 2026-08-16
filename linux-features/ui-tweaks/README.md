@@ -1,6 +1,6 @@
 # UI Tweaks
 
-`ui-tweaks` is an optional Linux feature for small ChatGPT Desktop UI
+`ui-tweaks` is an optional Linux feature for small ChatGPT Community UI
 customizations. It is disabled by default and is intended as a shared place for
 future visual tweaks that are useful to some Linux users but should not affect
 the baseline app.
@@ -17,6 +17,8 @@ Enable it in the local, gitignored feature config:
 
 | Tweak | Patch module | What it does | Settings |
 | --- | --- | --- | --- |
+| `appearance.dockIcon` | `patches/dock-icon.js` | Exposes the upstream Dock icon selector and synchronizes the selected icon across Linux windows, tray, and supported desktop launchers. | `tweaks.appearance.dockIcon.enabled` |
+| `home.suggestedPrompts` | `patches/suggested-prompts.js` | Exposes the upstream Suggested Prompts setting and enables generated project-aware cards on Home. | `tweaks.home.suggestedPrompts.enabled` |
 | `modelPicker.showModelsByDefault` | `patches/model-picker-model-list.js` | Opens the advanced picker by default and shows model choices inline instead of hiding them behind the compact Power slider and a nested Model submenu. | `tweaks.modelPicker.showModelsByDefault.enabled` |
 | `reasoning.keepEffortLabelsEnglish` | `patches/reasoning-effort-labels.js` | Keeps reasoning effort values in English in the Simplified Chinese UI while leaving the surrounding interface translated. | `tweaks.reasoning.keepEffortLabelsEnglish.enabled` |
 | `sidebar.projectName` | `patches/sidebar-project-name.js` | Styles project names in the left sidebar project list. It does not style `Projects` / `Chats` section headings and does not style chat rows. | `tweaks.sidebar.projectName.enabled`, `tweaks.sidebar.projectName.style` |
@@ -48,6 +50,96 @@ Example local config:
 
 Each tweak documents its own config keys below.
 
+### `appearance.dockIcon`
+
+Exposes the upstream Appearance row on Linux and applies the selection to
+existing and newly registered windows, the official Linux tray, and a managed
+user-local desktop entry. The ChatGPT choice uses `icon-chatgpt.png` from the
+signed official Linux package. The alternate choice uses the existing ChatGPT
+Community package icon; retired macOS DMG icon resources are not imported.
+
+Staging validates the official package's `chatgpt.desktop` identity before it
+copies the ChatGPT icon. Missing or changed package resources reject the
+candidate so an enabled Dock tweak cannot be installed without its runtime
+payload. The desktop helper writes only a full-state-hash-owned launcher derived
+from an identity-matching packaged entry. AppImage launch commands are rewritten
+to the persistent AppImage path instead of the temporary mounted `AppRun`.
+The prelaunch hook removes only an unchanged managed override after the nested
+tweak is disabled. Desktop entries carry a full-content digest, while icon files
+use content-addressed names whose digest must match their bytes. Any user edit or
+pre-existing conflicting icon is preserved, and interrupted sync or cleanup can
+resume without a separate ownership sidecar. A per-app lock serializes runtime
+updates, and later runs remove only digest-verified orphan icons from the three
+feature-owned selection namespaces.
+
+This tweak is independently disabled by default:
+
+```json
+{
+  "enabled": ["ui-tweaks"],
+  "settings": {
+    "ui-tweaks": {
+      "tweaks": {
+        "appearance": {
+          "dockIcon": {
+            "enabled": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Config keys:
+
+- `enabled`: `true` applies the two current official-package Dock descriptors
+  and stages their resources. `false` leaves official Linux behavior unchanged.
+
+To remove `ui-tweaks` after using a custom Dock icon, first keep the feature
+enabled, set `appearance.dockIcon.enabled` to `false`, rebuild and install, and
+launch the app once. That launch lets the marker-safe prelaunch hook remove its
+managed desktop override and icons. The feature can then be removed from the
+next rebuild. Removing `ui-tweaks` directly does not run feature-owned local
+cleanup, by design.
+
+### `home.suggestedPrompts`
+
+Exposes the upstream Suggested Prompts row in General Settings and enables the
+existing generated-suggestion path on Home. Suggestions are generated from the
+selected project and connected apps by the upstream implementation. Selecting a
+card fills the composer with its proposed next action.
+
+The patch continues to call the upstream rollout and account-eligibility
+functions for diagnostics, then honors the explicit Linux opt-in. It also keeps
+the upstream setting as the user's runtime on/off control after the feature is
+built into the app.
+
+This tweak is independently disabled by default:
+
+```json
+{
+  "enabled": ["ui-tweaks"],
+  "settings": {
+    "ui-tweaks": {
+      "tweaks": {
+        "home": {
+          "suggestedPrompts": {
+            "enabled": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Config keys:
+
+- `enabled`: `true` applies the four current-package Suggested Prompts descriptors.
+  `false` leaves the upstream Settings and Home behavior unchanged while other
+  UI tweaks remain independently configurable.
+
 ### `modelPicker.showModelsByDefault`
 
 Makes the detailed model list the default Codex composer picker view. The model
@@ -57,7 +149,8 @@ Power slider or opening a nested Model submenu. The compact GPT-5.6 Power
 slider also derives Sol's positions from the model's `supportedReasoningEfforts`
 after the app filters that list through the reasoning efforts enabled in
 settings. Enabled efforts such as Max therefore appear without maintaining a
-separate hard-coded effort list.
+separate hard-coded effort list. This tweak is disabled by default and must be
+enabled explicitly.
 
 Config keys:
 
@@ -66,7 +159,7 @@ Config keys:
 
 ### `reasoning.keepEffortLabelsEnglish`
 
-Leaves the reasoning effort values as `None`, `Minimal`, `Low`, `Medium`,
+Leaves the current reasoning effort values as `None`, `Minimal`, `Medium`,
 `High`, `XHigh`, `Max`, and `Ultra` in the Simplified Chinese locale. The
 surrounding picker title and usage warning remain translated. This avoids
 collapsing distinct upstream values such as `XHigh` and `Ultra` into the same
@@ -89,7 +182,7 @@ Tracked default in `feature.json`:
     "sidebar": {
       "projectName": {
         "enabled": true,
-        "style": "font-weight: 700 !important; padding-top: 0.25rem;"
+        "style": "font-weight: 700 !important;"
       }
     }
   }
@@ -103,15 +196,19 @@ Config keys:
 - `style`: CSS declaration list inserted into the project-name rule, such as
   `font-weight: 800 !important; color: red;`. It is not arbitrary CSS; unsafe
   syntax that could escape the scoped rule warns and falls back to the default.
-  The default is `font-weight: 700 !important; padding-top: 0.25rem;`, so
-  project names are bold with a small top offset and no color is forced.
+  The default is `font-weight: 700 !important;`, so project names are bold
+  without changing the fixed row geometry or forcing a color.
 
 ## Drift Behavior
 
-The patches are fail-soft. If upstream bundle markers drift, the feature writes
-a `WARN` message and leaves the asset unchanged. Invalid style values also warn
-and fall back to the default bold style. The feature should not block install,
-rebuild, or packaging flows.
+The ASAR patches are fail-soft. If upstream bundle markers drift, the feature
+writes a `WARN` message and leaves the asset unchanged. The patch report exposes
+that warning, and acceptance rejects a candidate when the enabled feature has
+drifted. Missing Dock icon package resources or metadata fail the stage hook,
+remove only the incomplete Dock icon payload, and reject candidate promotion.
+Suggested Prompts validates every current insertion point
+before changing an asset and leaves mixed or drifted input byte-identical.
+Invalid style values warn and fall back to the default bold style.
 
 ## Adding Tweaks
 

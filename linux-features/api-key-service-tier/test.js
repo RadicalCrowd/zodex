@@ -36,6 +36,10 @@ function applyPatchTwice(patchFn, source) {
   return once;
 }
 
+function currentModelFixture() {
+  return "function iti({additionalAvailableModels:e,authMethod:t,availableModels:n,defaultModel:r,enabledReasoningEfforts:i,includeUltraReasoningEffort:a,isCustomModelProvider:o=!1,models:s,useHiddenModels:c}){let l=[],u=null,d=s.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`max`)),f=a&&s.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`ultra`));return s.forEach(r=>{if(ati({additionalAvailableModels:e,authMethod:t,availableModels:n,isCustomModelProvider:o,model:r,useHiddenModels:c})){let e=a?r.supportedReasoningEfforts:r.supportedReasoningEfforts.filter(({reasoningEffort:e})=>e!==`ultra`),n=(t===`copilot`?[e.find(e=>e.reasoningEffort===`medium`)??{reasoningEffort:`medium`,description:`medium effort`}]:e).filter(({reasoningEffort:e})=>cI(e)&&i.has(e)),o={...r,supportedReasoningEfforts:n};l.push(o),r.isDefault&&(u=o)}}),u??=l.find(e=>e.model===r)??null,{models:l,defaultModel:u,hasModelSupportingMaxReasoningEffort:d,hasModelSupportingUltraReasoningEffort:f}}";
+}
+
 function captureWarnings(callback) {
   const warnings = [];
   const originalWarn = console.warn;
@@ -85,7 +89,7 @@ test("api-key-service-tier stays disabled until listed in features.json", () => 
   });
 });
 
-test("current DMG descriptors target the three owning app bundles", () => {
+test("current package descriptors use the semantic app-initial owner", () => {
   assert.deepEqual(
     descriptors.map((descriptor) => descriptor.id),
     [
@@ -94,38 +98,8 @@ test("current DMG descriptors target the three owning app bundles", () => {
       "api-key-service-tier-fallback",
     ],
   );
-  assert.equal(
-    descriptors[0].pattern.test("app-initial~app-main~onboarding-page-DjTNhJXu.js"),
-    true,
-  );
-  assert.equal(
-    descriptors[1].pattern.test(
-      "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-BpnUyB2R.js",
-    ),
-    true,
-  );
-  assert.equal(
-    descriptors[2].pattern.test(
-      "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-BqLP6EDd.js",
-    ),
-    true,
-  );
-  assert.equal(
-    descriptors.some((descriptor) =>
-      descriptor.pattern.test(
-        "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-C17KDkOa.js",
-      ),
-    ),
-    false,
-  );
-  assert.equal(
-    descriptors.some((descriptor) =>
-      descriptor.pattern.test(
-        "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-y0KJWbm3.js",
-      ),
-    ),
-    false,
-  );
+  assert.ok(descriptors.every((descriptor) => descriptor.pattern.test("app-initial-Bd3Z1bES.js")));
+  assert.ok(descriptors.every((descriptor) => !descriptor.pattern.test("projects-index-page-DjNy92Xe.js")));
 });
 
 test("current target wrappers warn when an exact contract disappears", () => {
@@ -153,20 +127,20 @@ test("partial current drift is reported when the other exact target still applie
       const assetsDir = path.join(tempApp, "webview", "assets");
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(
-        path.join(assetsDir, "app-initial~app-main~onboarding-page-drifted.js"),
+        path.join(assetsDir, "app-initial-gate-drifted.js"),
         "function driftedGate(){return `priority_mode`}",
       );
       fs.writeFileSync(
         path.join(
           assetsDir,
-          "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-current.js",
+          "app-initial-model-current.js",
         ),
-        "function vbe({authMethod:e,availableModels:t,defaultModel:n,enabledReasoningEfforts:r,includeUltraReasoningEffort:i,models:a,useHiddenModels:o}){let s=[],c=null,l=o&&e!==`amazonBedrock`,u=a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`max`)),d=i&&a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`ultra`));return a.forEach(n=>{if(l?t.has(n.model):!n.hidden){let t=i?n.supportedReasoningEfforts:n.supportedReasoningEfforts.filter(({reasoningEffort:e})=>e!==`ultra`),a=(e===`copilot`?[t.find(e=>e.reasoningEffort===`medium`)??{reasoningEffort:`medium`,description:`medium effort`}]:t).filter(({reasoningEffort:e})=>Gx(e)&&r.has(e)),o={...n,supportedReasoningEfforts:a};s.push(o),n.isDefault&&(c=o)}}),c??=s.find(e=>e.model===n)??null,{models:s,defaultModel:c}}",
+        currentModelFixture(),
       );
       fs.writeFileSync(
         path.join(
           assetsDir,
-          "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-current.js",
+          "app-initial-fallback-current.js",
         ),
         [
           "let defaultServiceTier=null;",
@@ -188,7 +162,7 @@ test("partial current drift is reported when the other exact target still applie
         (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-fallback",
       );
 
-      assert.ok(warnings.some((warning) => warning.includes("current service tier auth gate")));
+      assert.ok(warnings.some((warning) => warning.includes("current API key service tier gate bundle")));
       assert.equal(gate?.status, "skipped-optional");
       assert.equal(model?.status, "applied");
       assert.equal(fallback?.status, "applied");
@@ -275,14 +249,13 @@ test("service tier auth gate stays warning-idempotent with an earlier auth bindi
 });
 
 test("model list entries are marked only when loaded for API-key hosts", () => {
-  const source =
-    "function vbe({authMethod:e,availableModels:t,defaultModel:n,enabledReasoningEfforts:r,includeUltraReasoningEffort:i,models:a,useHiddenModels:o}){let s=[],c=null,l=o&&e!==`amazonBedrock`,u=a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`max`)),d=i&&a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`ultra`));return a.forEach(n=>{if(l?t.has(n.model):!n.hidden){let t=i?n.supportedReasoningEfforts:n.supportedReasoningEfforts.filter(({reasoningEffort:e})=>e!==`ultra`),a=(e===`copilot`?[t.find(e=>e.reasoningEffort===`medium`)??{reasoningEffort:`medium`,description:`medium effort`}]:t).filter(({reasoningEffort:e})=>Gx(e)&&r.has(e)),o={...n,supportedReasoningEfforts:a};s.push(o),n.isDefault&&(c=o)}}),c??=s.find(e=>e.model===n)??null,{models:s,defaultModel:c}}";
+  const source = currentModelFixture();
 
   assert.equal(hasApiKeyModelListMappingShape(source), true);
 
   const patched = applyPatchTwice(applyApiKeyModelMarkerPatch, source);
 
-  assert.match(patched, /o=\{\.\.\.n,supportedReasoningEfforts:a,codexLinuxApiKeyServiceTierModel:e===`apikey`\}/);
+  assert.match(patched, /o=\{\.\.\.r,supportedReasoningEfforts:n,codexLinuxApiKeyServiceTierModel:t===`apikey`\}/);
 });
 
 test("model list marker warning ignores unrelated app-main chunks", () => {
@@ -300,7 +273,7 @@ test("model list marker warning ignores unrelated app-main chunks", () => {
 
 test("model list marker warning still reports a recognizable unpatchable mapping", () => {
   const source =
-    "function broken({authMethod:e,availableModels:t,defaultModel:n,enabledReasoningEfforts:r,includeUltraReasoningEffort:i,models:a,useHiddenModels:o}){return a.map(e=>({supportedReasoningEfforts:e.supportedReasoningEfforts,isDefault:e.isDefault}))}";
+    "function broken({additionalAvailableModels:e,authMethod:t,availableModels:n,defaultModel:r,enabledReasoningEfforts:i,includeUltraReasoningEffort:a,isCustomModelProvider:o=!1,models:s,useHiddenModels:c}){return s.map(e=>({supportedReasoningEfforts:e.supportedReasoningEfforts,hasModelSupportingUltraReasoningEffort:e.isDefault}))}";
 
   assert.equal(hasApiKeyModelListMappingShape(source), true);
   assert.deepEqual(captureWarnings(() => {
@@ -347,7 +320,7 @@ test("fallback descriptor reports skipped when one insertion point drifts", () =
       const assetsDir = path.join(tempApp, "webview", "assets");
       const targetPath = path.join(
         assetsDir,
-        "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-drifted.js",
+        "app-initial-fallback-drifted.js",
       );
       const source = [
         "let defaultServiceTier=null;",
@@ -363,7 +336,7 @@ test("fallback descriptor reports skipped when one insertion point drifts", () =
         (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-fallback",
       );
 
-      assert.ok(warnings.some((warning) => warning.includes("all current service tier option helpers")));
+      assert.ok(warnings.some((warning) => warning.includes("current API key service tier fallback bundle")));
       assert.equal(fallback?.status, "skipped-optional");
       assert.equal(fs.readFileSync(targetPath, "utf8"), source);
     } finally {
@@ -375,7 +348,7 @@ test("fallback descriptor reports skipped when one insertion point drifts", () =
 test("combined patch updates both service tier gate and fallback options", () => {
   const source = [
     "function sxe(e){let t=(0,cxe.c)(6),n=X(os),r=e?.hostId??n,i=Cf(r),a=i?.authMethod===`chatgpt`,o=i?.authMethod??null,s;t[0]!==r||t[1]!==o?(s={authMethod:o,hostId:r},t[0]=r,t[1]=o,t[2]=s):s=t[2];let{data:c,isPending:l}=ye(is,s),u=!!i?.isLoading||a&&l,d=a&&!u&&c!=null&&c?.requirements?.featureRequirements?.fast_mode!==!1,f;return t[3]!==u||t[4]!==d?(f={isServiceTierAllowed:d,isLoading:u},t[3]=u,t[4]=d,t[5]=f):f=t[5],f}",
-    "function vbe({authMethod:e,availableModels:t,defaultModel:n,enabledReasoningEfforts:r,includeUltraReasoningEffort:i,models:a,useHiddenModels:o}){let s=[],c=null,l=o&&e!==`amazonBedrock`,u=a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`max`)),d=i&&a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`ultra`));return a.forEach(n=>{if(l?t.has(n.model):!n.hidden){let t=i?n.supportedReasoningEfforts:n.supportedReasoningEfforts.filter(({reasoningEffort:e})=>e!==`ultra`),a=(e===`copilot`?[t.find(e=>e.reasoningEffort===`medium`)??{reasoningEffort:`medium`,description:`medium effort`}]:t).filter(({reasoningEffort:e})=>Gx(e)&&r.has(e)),o={...n,supportedReasoningEfforts:a};s.push(o),n.isDefault&&(c=o)}}),c??=s.find(e=>e.model===n)??null,{models:s,defaultModel:c}}",
+    currentModelFixture(),
     "function pQ(e,t){return t==null?null:t===`fast`?mQ(e):e?.serviceTiers?.find(e=>e.id===t)??null}",
     "function tEe(e){return[{description:yQ.standardDescription,iconKind:null,label:yQ.standardLabel,tier:null,value:null},...(e?.serviceTiers??[]).map(e=>({description:eEe(e),iconKind:fQ(e.id,e.name),label:$Te(e),tier:e,value:e.id}))]}",
     "function mQ(e){return e?.serviceTiers?.find(e=>fQ(e.id,e.name)===`fast`||e.name.trim().toLowerCase()===`priority`)??null}",
@@ -384,7 +357,7 @@ test("combined patch updates both service tier gate and fallback options", () =>
   const patched = applyPatchTwice(applyApiKeyServiceTierPatch, source);
 
   assert.match(patched, /o===`apikey`/);
-  assert.match(patched, /codexLinuxApiKeyServiceTierModel:e===`apikey`/);
+  assert.match(patched, /codexLinuxApiKeyServiceTierModel:t===`apikey`/);
   assert.match(patched, /e\?\.codexLinuxApiKeyServiceTierModel!==!0\?null/);
   assert.match(patched, /function codexLinuxApiKeyFastTier\(e\)/);
 });

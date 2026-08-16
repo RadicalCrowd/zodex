@@ -19,16 +19,6 @@ function applyProjectTaskSortPatch(source) {
     return source;
   }
 
-  if (
-    !source.includes("sidebarElectron.sortMenu.manual") ||
-    !source.includes("sidebarElectron.sortMenu.created")
-  ) {
-    console.warn(
-      "WARN: Could not find current project task sort menu markers - skipping project task sort feature patch",
-    );
-    return source;
-  }
-
   if (unpatchedCount !== 1 || patchedCount !== 0) {
     console.warn(
       "WARN: Could not find current project task creation timestamp insertion point - skipping project task sort feature patch",
@@ -39,14 +29,22 @@ function applyProjectTaskSortPatch(source) {
   return source.replace(currentCreationTime, patchedCreationTime);
 }
 
+function matchesProjectTaskSortContract(source) {
+  const currentCount = countOccurrences(source, currentCreationTime);
+  const patchedCount = countOccurrences(source, patchedCreationTime);
+  const unpatchedCount = currentCount - patchedCount;
+  return (patchedCount === 1 && unpatchedCount === 0) ||
+    (patchedCount === 0 && unpatchedCount === 1);
+}
+
 const descriptors = [
   {
     id: "creation-time",
     phase: "webview-asset",
     order: 20_900,
     ciPolicy: "optional",
-    pattern:
-      /^app-initial~app-main~projects-index-page~remote-conversation-page-[A-Za-z0-9_-]+\.js$/,
+    pattern: /^app-initial-[^.]+\.js$/,
+    assetMatch: matchesProjectTaskSortContract,
     missingDescription: "project task sort webview bundle",
     skipDescription: "project task creation timestamp feature patch",
     apply: applyProjectTaskSortPatch,
@@ -55,5 +53,6 @@ const descriptors = [
 
 module.exports = {
   applyProjectTaskSortPatch,
+  matchesProjectTaskSortContract,
   descriptors,
 };

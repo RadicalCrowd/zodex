@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   PATCH_STATUS_APPLIED,
+  PATCH_STATUS_FAILED_INTEGRITY,
   PATCH_STATUS_FAILED_REQUIRED,
   PATCH_STATUS_SKIPPED_DISABLED,
   PATCH_STATUS_SKIPPED_OPTIONAL,
@@ -14,10 +15,14 @@ const {
   recordPatch,
 } = require("../lib/patch-report.js");
 const {
+  isPatchIntegrityError,
+} = require("./integrity-error.js");
+const {
   linuxTargetSummary,
 } = require("../lib/linux-target-context.js");
 const {
   patchAssetFiles,
+  patchUniqueAssetFile,
 } = require("./lib/assets.js");
 const {
   CI_POLICIES,
@@ -50,15 +55,29 @@ function normalizeDescriptor(descriptor, sourcePath = null, index = 0) {
   if (typeof descriptor.apply !== "function") {
     throw new Error(`Patch descriptor '${id}' must export an apply function`);
   }
+  if (descriptor.assetMatch != null && typeof descriptor.assetMatch !== "function") {
+    throw new Error(`Patch descriptor '${id}' assetMatch must be a function`);
+  }
   const ciPolicy = descriptor.ciPolicy ?? OPTIONAL;
   if (!CI_POLICIES.has(ciPolicy)) {
     throw new Error(
       `Patch descriptor '${id}' has unsupported ciPolicy '${ciPolicy}' in ${sourcePath ?? "inline descriptor"}`,
     );
   }
+  if (descriptor.enforceWhenEnabled != null && typeof descriptor.enforceWhenEnabled !== "boolean") {
+    throw new Error(
+      `Patch descriptor '${id}' enforceWhenEnabled must be a boolean in ${sourcePath ?? "inline descriptor"}`,
+    );
+  }
+  if (descriptor.enforceWhenEnabled === false && ciPolicy !== OPTIONAL) {
+    throw new Error(
+      `Patch descriptor '${id}' can disable enabled-feature enforcement only with ciPolicy 'optional'`,
+    );
+  }
   const normalized = {
     ...descriptor,
     ciPolicy,
+    enforceWhenEnabled: descriptor.enforceWhenEnabled ?? true,
     id,
     name: descriptor.name ?? id,
     phase: descriptor.phase ?? PHASE_MAIN_BUNDLE,
@@ -70,6 +89,9 @@ function normalizeDescriptor(descriptor, sourcePath = null, index = 0) {
     throw new Error(
       `Patch descriptor '${id}' has unsupported phase '${normalized.phase}' in ${sourcePath ?? "inline descriptor"}`,
     );
+  }
+  if (normalized.composesPatches != null) {
+    throw new Error(`Patch descriptor '${id}' uses removed composesPatches support`);
   }
   return normalized;
 }
@@ -160,11 +182,15 @@ function descriptorFailureStatus(descriptor) {
 
 function describePatchError(descriptor, error) {
   const message = error instanceof Error ? error.message : String(error);
+  if (isPatchIntegrityError(error)) {
+    return `Patch '${descriptor.id}' integrity failure: ${message}`;
+  }
   return `Patch '${descriptor.id}' threw: ${message}`;
 }
 
-// Runs a descriptor's apply function so that a throw never escapes the engine:
-// the descriptor's ciPolicy — not the throw — decides whether the build fails.
+// Runs a descriptor's apply function so ordinary errors can follow ciPolicy.
+// PatchIntegrityError is recorded by the caller and then rethrown because the
+// patch could not prove that a failed mutation restored the original bytes.
 // Strategy telemetry recorded during the apply is drained into the result so
 // it can be attributed to this descriptor's report entry.
 function runDescriptorApply(descriptor, fn, fallbackValue) {
@@ -206,6 +232,9 @@ function recordDescriptorPatch(report, descriptor, status, reason, context, extr
     ciPolicy: descriptor.ciPolicy ?? "optional",
     sourceKind: descriptor.sourceKind ?? "core",
     ...(descriptor.featureId != null ? { featureId: descriptor.featureId } : {}),
+    ...(descriptor.sourceKind === "feature"
+      ? { enforceWhenEnabled: descriptor.enforceWhenEnabled !== false }
+      : {}),
     ...(extraMetadata ?? {}),
     ...warnings,
   });
@@ -219,11 +248,40 @@ function recordDescriptorError(report, descriptor, error, context, strategies = 
   recordDescriptorPatch(
     report,
     descriptor,
-    descriptorFailureStatus(descriptor),
+    isPatchIntegrityError(error)
+      ? PATCH_STATUS_FAILED_INTEGRITY
+      : descriptorFailureStatus(descriptor),
     describePatchError(descriptor, error),
     context,
     { error: true, ...(strategyMetadata(strategies) ?? {}) },
   );
+}
+
+function recordUnavailablePhasePatchDescriptors(descriptors, phase, context, report, reason) {
+  for (const descriptor of descriptors.filter((patch) => patch.phase === phase)) {
+    if (!descriptorAppliesTo(descriptor, context)) {
+      recordDescriptorPatch(report, descriptor, PATCH_STATUS_SKIPPED_TARGET, null, context);
+      continue;
+    }
+    if (!descriptorEnabled(descriptor, context)) {
+      recordDescriptorPatch(report, descriptor, PATCH_STATUS_SKIPPED_DISABLED, null, context);
+      continue;
+    }
+    recordDescriptorPatch(
+      report,
+      descriptor,
+      descriptorFailureStatus(descriptor),
+      reason,
+      context,
+      { unavailable: true },
+    );
+  }
+}
+
+function rethrowPatchIntegrityError(error) {
+  if (isPatchIntegrityError(error)) {
+    throw error;
+  }
 }
 
 function descriptorAppliesTo(descriptor, context) {
@@ -271,6 +329,8 @@ function applyMainBundlePatchDescriptors(source, descriptors, context, report) {
     context.reportWarnings = result.warnings;
     if (result.error != null) {
       recordDescriptorError(report, descriptor, result.error, context, result.strategies);
+      delete context.reportWarnings;
+      rethrowPatchIntegrityError(result.error);
     } else {
       recordDescriptorPatch(
         report,
@@ -292,6 +352,19 @@ function defaultWebviewMissingWarning(extractedDir, descriptor) {
   return `WARN: Could not find ${missingDescription} in ${path.join(extractedDir, "webview", "assets")} — skipping ${skipDescription}`;
 }
 
+function defaultWebviewAmbiguousWarning(extractedDir, descriptor) {
+  const missingDescription = descriptor.missingDescription ?? "webview asset bundle";
+  const skipDescription = descriptor.skipDescription ?? descriptor.id;
+  return `WARN: Found multiple ${missingDescription} contracts in ${path.join(extractedDir, "webview", "assets")} — skipping ${skipDescription}`;
+}
+
+function assetPatchMetadata(patchResult, strategies) {
+  return {
+    ...(patchResult.assetName == null ? {} : { assetName: patchResult.assetName }),
+    ...(strategyMetadata(strategies) ?? {}),
+  };
+}
+
 function recordAssetDescriptorPatch(report, descriptor, patchResult, warnings, context, strategies = null) {
   if (patchResult.matched === 0) {
     recordDescriptorPatch(
@@ -300,7 +373,7 @@ function recordAssetDescriptorPatch(report, descriptor, patchResult, warnings, c
       descriptorFailureStatus(descriptor),
       warnings[0] ?? "no matching bundle found",
       context,
-      strategyMetadata(strategies),
+      assetPatchMetadata(patchResult, strategies),
     );
     return;
   }
@@ -310,7 +383,7 @@ function recordAssetDescriptorPatch(report, descriptor, patchResult, warnings, c
     patchStatusFromDescriptorChange(descriptor, patchResult.changed > 0, warnings),
     warnings[0] ?? null,
     context,
-    strategyMetadata(strategies),
+    assetPatchMetadata(patchResult, strategies),
   );
 }
 
@@ -331,15 +404,28 @@ function applyWebviewAssetPatchDescriptors(extractedDir, descriptors, context, r
     }
     const missingWarning = descriptor.missingWarning ??
       defaultWebviewMissingWarning(extractedDir, descriptor);
+    const ambiguousWarning = descriptor.ambiguousWarning ??
+      defaultWebviewAmbiguousWarning(extractedDir, descriptor);
     const { value: result, warnings, error, strategies } = runDescriptorApply(
       descriptor,
-      () => patchAssetFiles(extractedDir, pattern, (source) => descriptor.apply(source, context), missingWarning),
-      { matched: 0, changed: 0 },
+      () => descriptor.assetMatch == null
+        ? patchAssetFiles(extractedDir, pattern, (source) => descriptor.apply(source, context), missingWarning)
+        : patchUniqueAssetFile(
+          extractedDir,
+          pattern,
+          (source, assetName) => descriptor.assetMatch(source, assetName, context),
+          (source) => descriptor.apply(source, context),
+          missingWarning,
+          ambiguousWarning,
+        ),
+      { matched: 0, changed: 0, assetName: null },
     );
     context.reportWarnings = warnings;
     if (error != null) {
       warnings.push(`WARN: ${describePatchError(descriptor, error)}`);
       recordDescriptorError(report, descriptor, error, context, strategies);
+      delete context.reportWarnings;
+      rethrowPatchIntegrityError(error);
     } else {
       recordAssetDescriptorPatch(report, descriptor, result, warnings, context, strategies);
     }
@@ -371,6 +457,7 @@ function applyExtractedAppPatchDescriptors(extractedDir, descriptors, context, r
       warnings.push(`WARN: ${describePatchError(descriptor, error)}`);
       recordDescriptorError(report, descriptor, error, context, strategies);
       delete context.reportWarnings;
+      rethrowPatchIntegrityError(error);
       continue;
     }
     const statusResult = typeof descriptor.status === "function"
@@ -404,5 +491,6 @@ module.exports = {
   normalizeDescriptor,
   normalizePatchDescriptors,
   patchTargetSummary,
+  recordUnavailablePhasePatchDescriptors,
   sortPatchDescriptors,
 };

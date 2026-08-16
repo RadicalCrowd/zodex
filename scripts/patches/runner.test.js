@@ -1,62 +1,79 @@
+"use strict";
+
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-
 const {
   createPatchReport,
+  enabledFeatureFailuresFromReport,
 } = require("../lib/patch-report.js");
 const {
+  allPatchPolicies,
+  corePatchDescriptors,
+  createMainBundleContext,
   patchExtractedApp,
+  requiredPatchNamesForProfile,
 } = require("./runner.js");
 
-test("runner executes descriptor phases explicitly and sorts order only within each phase", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-runner-phase-order-"));
+const emptyConfig = path.join(__dirname, "..", "..", "linux-features", "features.example.json");
+
+test("official baseline has no core descriptors or required patch policies", () => {
+  assert.deepEqual(corePatchDescriptors(), []);
+  assert.deepEqual(allPatchPolicies({ featuresConfigPath: emptyConfig }), []);
+  assert.deepEqual(requiredPatchNamesForProfile("upstream-build", { featuresConfigPath: emptyConfig }), []);
+});
+
+test("runner context exposes enabled feature IDs", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "runner-context-"));
   try {
-    const appDir = path.join(tempRoot, "app");
-    const buildDir = path.join(appDir, ".vite", "build");
-    const assetsDir = path.join(appDir, "webview", "assets");
-    const coreRoot = path.join(tempRoot, "core");
-    const patchDir = path.join(coreRoot, "all-linux", "sample");
-    fs.mkdirSync(buildDir, { recursive: true });
-    fs.mkdirSync(assetsDir, { recursive: true });
-    fs.mkdirSync(patchDir, { recursive: true });
-    fs.writeFileSync(path.join(buildDir, "main.js"), "main");
-    fs.writeFileSync(path.join(assetsDir, "app-test.js"), "asset");
-    fs.writeFileSync(path.join(assetsDir, "app-test.png"), "");
-
-    fs.writeFileSync(
-      path.join(patchDir, "patch.js"),
-      [
-        "\"use strict\";",
-        `const descriptor = require(${JSON.stringify(path.join(__dirname, "descriptor.js"))});`,
-        "module.exports = [",
-        "  descriptor.webviewAssetPatch({ id: 'webview-low-order', order: 1, pattern: /^app-.*\\.js$/, apply: (source) => source + '|webview' }),",
-        "  descriptor.extractedAppPatch({ id: 'post-high-order', phase: descriptor.PHASE_EXTRACTED_APP_POST_WEBVIEW, order: 1, apply: () => ({ changed: true }) }),",
-        "  descriptor.mainBundlePatch({ id: 'main-high-order', order: 20, apply: (source) => source + '|main-high' }),",
-        "  descriptor.extractedAppPatch({ id: 'pre-high-order', phase: descriptor.PHASE_EXTRACTED_APP_PRE_WEBVIEW, order: 9999, apply: () => ({ changed: true }) }),",
-        "  descriptor.mainBundlePatch({ id: 'main-low-order', order: 10, apply: (source) => source + '|main-low' }),",
-        "];",
-        "",
-      ].join("\n"),
-    );
-
-    const report = createPatchReport();
-    patchExtractedApp(appDir, {
-      report,
-      corePatchRoot: coreRoot,
-      featuresConfigPath: path.join(__dirname, "..", "..", "linux-features", "features.example.json"),
-    });
-
-    const names = report.patches.map((patch) => patch.name);
-    assert.ok(names.indexOf("main-low-order") < names.indexOf("main-high-order"));
-    assert.ok(names.indexOf("main-high-order") < names.indexOf("pre-high-order"));
-    assert.ok(names.indexOf("pre-high-order") < names.indexOf("webview-low-order"));
-    assert.ok(names.indexOf("webview-low-order") < names.indexOf("post-high-order"));
-    assert.equal(fs.readFileSync(path.join(buildDir, "main.js"), "utf8"), "main|main-low|main-high");
-    assert.equal(fs.readFileSync(path.join(assetsDir, "app-test.js"), "utf8"), "asset|webview");
+    const config = path.join(temp, "features.json");
+    fs.writeFileSync(config, '{"enabled":["frameless-titlebar"]}\n');
+    const context = createMainBundleContext(null, { featuresConfigPath: config });
+    assert.deepEqual(context.enabledFeatureIds, ["frameless-titlebar"]);
   } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(temp, { recursive: true, force: true });
   }
+});
+
+test("empty feature set leaves official extracted files byte-identical", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runner-baseline-"));
+  try {
+    const mainDir = path.join(root, ".vite", "build");
+    const webviewDir = path.join(root, "webview", "assets");
+    fs.mkdirSync(mainDir, { recursive: true });
+    fs.mkdirSync(webviewDir, { recursive: true });
+    const main = path.join(mainDir, "main.js");
+    const webview = path.join(webviewDir, "app-initial-A.js");
+    fs.writeFileSync(main, "official-main\n");
+    fs.writeFileSync(webview, "official-webview\n");
+    const report = createPatchReport();
+    patchExtractedApp(root, { report, featuresConfigPath: emptyConfig });
+    assert.equal(fs.readFileSync(main, "utf8"), "official-main\n");
+    assert.equal(fs.readFileSync(webview, "utf8"), "official-webview\n");
+    assert.deepEqual(report.patches, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("missing main bundle records enabled feature drift", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runner-missing-main-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const config = path.join(root, "features.json");
+  fs.writeFileSync(config, '{"enabled":["frameless-titlebar"]}\n');
+  const report = createPatchReport();
+
+  patchExtractedApp(root, { report, featuresConfigPath: config });
+
+  const [entry] = report.patches;
+  assert.equal(entry.name, "feature:frameless-titlebar:main-process");
+  assert.equal(entry.status, "skipped-optional");
+  assert.equal(entry.enforceWhenEnabled, true);
+  assert.equal(entry.unavailable, true);
+  assert.equal(
+    enabledFeatureFailuresFromReport(report).some((failure) => failure.name === entry.name),
+    true,
+  );
 });
