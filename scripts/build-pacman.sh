@@ -20,6 +20,7 @@ PACKAGE_DESCRIPTION="${PACKAGE_DESCRIPTION:-}"
 [ -n "$PACKAGE_DESCRIPTION" ] || \
 	PACKAGE_DESCRIPTION="Custom codex-desktop distribution built from OpenAI's official Linux package"
 PACKAGE_URL="${PACKAGE_URL:-https://github.com/ilysenko/codex-desktop-linux}"
+PACKAGE_PACKAGER="${PACKAGE_PACKAGER:-}"
 ICON_SOURCE="$(resolve_package_icon_source)"
 MAX_BUILD_THREADS="${MAX_BUILD_THREADS:-0}"
 UPDATER_BINARY_SOURCE="${UPDATER_BINARY_SOURCE:-$REPO_DIR/target/release/codex-update-manager}"
@@ -56,7 +57,7 @@ pacman_version_parts() {
 	PACMAN_PKGREL="1"
 }
 
-write_threaded_makepkg_config() {
+write_makepkg_config() {
 	local target="$1"
 	local home_dir="${HOME:-}"
 	local xdg_config_home="${XDG_CONFIG_HOME:-}"
@@ -83,8 +84,13 @@ write_threaded_makepkg_config() {
 			done
 			[ -n "$user_makepkg_conf" ] && printf '. %q\n' "$user_makepkg_conf"
 		fi
-		printf 'MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }-j%s"\n' "$MAX_BUILD_THREADS"
-		printf 'COMPRESSZST=(zstd -c -z -T%s -)\n' "$MAX_BUILD_THREADS"
+		if [ -n "$PACKAGE_PACKAGER" ]; then
+			printf 'PACKAGER=%q\n' "$PACKAGE_PACKAGER"
+		fi
+		if [ "$MAX_BUILD_THREADS" != "0" ]; then
+			printf 'MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }-j%s"\n' "$MAX_BUILD_THREADS"
+			printf 'COMPRESSZST=(zstd -c -z -T%s -)\n' "$MAX_BUILD_THREADS"
+		fi
 	} >"$target"
 }
 
@@ -125,11 +131,16 @@ main() {
 	# Pin PKGEXT so Debian/Ubuntu makepkg (defaults to .pkg.tar.gz) produces .zst for the collector
 	local -a makepkg_env=("PKGDEST=$DIST_DIR" "PKGEXT=.pkg.tar.zst")
 
-	if [ "$MAX_BUILD_THREADS" != "0" ]; then
+	if [ "$MAX_BUILD_THREADS" != "0" ] || [ -n "$PACKAGE_PACKAGER" ]; then
 		local makepkg_config="$build_root/makepkg.conf"
-		write_threaded_makepkg_config "$makepkg_config"
+		write_makepkg_config "$makepkg_config"
 		makepkg_env+=("MAKEPKG_CONF=$makepkg_config")
-		info "Pacman package build/compression threads: $MAX_BUILD_THREADS"
+		if [ "$MAX_BUILD_THREADS" != "0" ]; then
+			info "Pacman package build/compression threads: $MAX_BUILD_THREADS"
+		fi
+		if [ -n "$PACKAGE_PACKAGER" ]; then
+			info "Pacman package packager: $PACKAGE_PACKAGER"
+		fi
 	fi
 
 	stage_common_package_files "$staging_root"

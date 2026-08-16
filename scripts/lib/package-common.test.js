@@ -94,6 +94,8 @@ test("pacman package metadata is caller-configurable without changing upstream d
   assert.match(builder, /PACKAGE_URL:-https:\/\/github\.com\/ilysenko\/codex-desktop-linux/);
   assert.match(zodexBuilder, /PACKAGE_MAINTAINER="RadicalCrowd Zodex Maintainers"/);
   assert.match(zodexBuilder, /PACKAGE_URL="https:\/\/github\.com\/RadicalCrowd\/zodex"/);
+  assert.match(zodexBuilder, /PACKAGE_PACKAGER="RadicalCrowd Zodex Maintainers"/);
+  assert.match(builder, /printf 'PACKAGER=%q\\n' "\$PACKAGE_PACKAGER"/);
 });
 
 test("custom no-updater packages never clean up codex-desktop's updater service", (t) => {
