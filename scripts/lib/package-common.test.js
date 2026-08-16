@@ -82,6 +82,20 @@ test("non-Debian package formats map the official runtime libraries", () => {
   }
 });
 
+test("pacman package metadata is caller-configurable without changing upstream defaults", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "packaging/linux/PKGBUILD.template"), "utf8");
+  const builder = fs.readFileSync(path.join(repoRoot, "scripts/build-pacman.sh"), "utf8");
+  const zodexBuilder = fs.readFileSync(path.join(repoRoot, "scripts/build-zodex-arch-candidate.sh"), "utf8");
+
+  for (const token of ["__PACKAGE_MAINTAINER__", "__PACKAGE_DESCRIPTION__", "__PACKAGE_URL__"]) {
+    assert.match(template, new RegExp(token));
+    assert.match(builder, new RegExp(token));
+  }
+  assert.match(builder, /PACKAGE_URL:-https:\/\/github\.com\/ilysenko\/codex-desktop-linux/);
+  assert.match(zodexBuilder, /PACKAGE_MAINTAINER="RadicalCrowd Zodex Maintainers"/);
+  assert.match(zodexBuilder, /PACKAGE_URL="https:\/\/github\.com\/RadicalCrowd\/zodex"/);
+});
+
 test("custom no-updater packages never clean up codex-desktop's updater service", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-no-updater-service-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

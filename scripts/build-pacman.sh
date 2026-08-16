@@ -15,6 +15,11 @@ PACKAGED_RUNTIME_TEMPLATE="$REPO_DIR/packaging/linux/codex-packaged-runtime.sh"
 
 PACKAGE_NAME="${PACKAGE_NAME:-codex-desktop}"
 PACKAGE_VERSION="${PACKAGE_VERSION:-$(date -u +%Y.%m.%d.%H%M%S)}"
+PACKAGE_MAINTAINER="${PACKAGE_MAINTAINER:-ChatGPT Community for Linux Maintainers}"
+PACKAGE_DESCRIPTION="${PACKAGE_DESCRIPTION:-}"
+[ -n "$PACKAGE_DESCRIPTION" ] || \
+	PACKAGE_DESCRIPTION="Custom codex-desktop distribution built from OpenAI's official Linux package"
+PACKAGE_URL="${PACKAGE_URL:-https://github.com/ilysenko/codex-desktop-linux}"
 ICON_SOURCE="$(resolve_package_icon_source)"
 MAX_BUILD_THREADS="${MAX_BUILD_THREADS:-0}"
 UPDATER_BINARY_SOURCE="${UPDATER_BINARY_SOURCE:-$REPO_DIR/target/release/codex-update-manager}"
@@ -137,18 +142,27 @@ main() {
 	restore_linux_feature_package_resource_permissions "$staging_root" "pacman"
 
 	local package_name
+	local package_maintainer
+	local package_description
+	local package_url
 	local pacman_pkgver
 	local pacman_pkgrel
 	local staging_dir
 	local arch_replacement
 	package_name="$(sed_escape_replacement "$PACKAGE_NAME")"
+	package_maintainer="$(sed_escape_replacement "$PACKAGE_MAINTAINER")"
+	package_description="$(sed_escape_replacement "$PACKAGE_DESCRIPTION")"
+	package_url="$(sed_escape_replacement "$PACKAGE_URL")"
 	pacman_pkgver="$(sed_escape_replacement "$PACMAN_PKGVER")"
 	pacman_pkgrel="$(sed_escape_replacement "$PACMAN_PKGREL")"
 	staging_dir="$(sed_escape_replacement "$staging_root")"
 	arch_replacement="$(sed_escape_replacement "$arch")"
 
 	sed \
+		-e "s/__PACKAGE_MAINTAINER__/$package_maintainer/g" \
 		-e "s/__PACKAGE_NAME__/$package_name/g" \
+		-e "s/__PACKAGE_DESCRIPTION__/$package_description/g" \
+		-e "s/__PACKAGE_URL__/$package_url/g" \
 		-e "s/__PKGVER__/$pacman_pkgver/g" \
 		-e "s/__PKGREL__/$pacman_pkgrel/g" \
 		-e "s|__STAGING_DIR__|$staging_dir|g" \
