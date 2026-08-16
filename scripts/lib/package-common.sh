@@ -396,11 +396,17 @@ SCRIPT
 
 render_no_updater_transition_cleanup_helper() {
     local target="$1"
+    local service_name
+
+    case "$PACKAGE_NAME" in
+        codex-desktop) service_name="codex-update-manager.service" ;;
+        *) service_name="${PACKAGE_NAME}-update-manager.service" ;;
+    esac
 
     cat > "$target" <<'SCRIPT'
 #!/bin/sh
 
-SERVICE_NAME="${SERVICE_NAME:-codex-update-manager.service}"
+SERVICE_NAME="${SERVICE_NAME:-__PACKAGE_UPDATE_MANAGER_SERVICE__}"
 
 codex_no_updater_foreach_user_manager() {
     if ! command -v runuser >/dev/null 2>&1 ||
@@ -479,6 +485,7 @@ codex_no_updater_cleanup_update_manager_service() {
     codex_no_updater_cleanup_user_enablement_links
 }
 SCRIPT
+    replace_literal_file_token "$target" "__PACKAGE_UPDATE_MANAGER_SERVICE__" "$service_name"
     chmod 0644 "$target"
 }
 

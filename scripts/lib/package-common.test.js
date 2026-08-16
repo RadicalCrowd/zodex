@@ -82,6 +82,26 @@ test("non-Debian package formats map the official runtime libraries", () => {
   }
 });
 
+test("custom no-updater packages never clean up codex-desktop's updater service", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-no-updater-service-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const customHelper = path.join(root, "zodex-cleanup.sh");
+  const defaultHelper = path.join(root, "codex-cleanup.sh");
+
+  runPackageCommon(
+    `PACKAGE_NAME=zodex render_no_updater_transition_cleanup_helper ${JSON.stringify(customHelper)}`,
+    root,
+  );
+  runPackageCommon(
+    `PACKAGE_NAME=codex-desktop render_no_updater_transition_cleanup_helper ${JSON.stringify(defaultHelper)}`,
+    root,
+  );
+
+  assert.match(fs.readFileSync(customHelper, "utf8"), /SERVICE_NAME="\$\{SERVICE_NAME:-zodex-update-manager\.service\}"/);
+  assert.doesNotMatch(fs.readFileSync(customHelper, "utf8"), /SERVICE_NAME="\$\{SERVICE_NAME:-codex-update-manager\.service\}"/);
+  assert.match(fs.readFileSync(defaultHelper, "utf8"), /SERVICE_NAME="\$\{SERVICE_NAME:-codex-update-manager\.service\}"/);
+});
+
 test("RPM updater selects the distro-specific GnuPG package", () => {
   const rpm = fs.readFileSync(path.join(repoRoot, "packaging/linux/codex-desktop.spec"), "utf8");
   assert.match(
