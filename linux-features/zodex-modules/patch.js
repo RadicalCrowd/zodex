@@ -9,9 +9,11 @@ function warn(message, patchName) {
 
 function mainBundleHelpers() {
   return [
+    `function zodexConfigFsModule(){return require(\`node:fs\`)}`,
     `function zodexConfigPathModule(){return require(\`node:path\`)}`,
-    `function zodexConfigModule(){let r=process.env.CODEX_LINUX_FEATURES_DIR;if(typeof r!==\`string\`||!r.trim())throw Error(\`CODEX_LINUX_FEATURES_DIR is unavailable\`);return require(zodexConfigPathModule().join(r,\`zodex-modules\`,\`config.js\`))}`,
-    `function zodexModuleStatus(){try{let m=zodexConfigModule(),r=m.readConfig(process.env);if(r.state!==\`valid\`)return{ok:r.state!==\`invalid\`,state:r.state,file:r.file,error:r.error,connections:[]};return{ok:!0,state:\`valid\`,file:r.file,connections:m.brokerConnectionStates(r.config)}}catch(e){return{ok:!1,state:\`invalid\`,file:null,error:String(e?.message||e),connections:[]}}}`,
+    `function zodexConfigModulePath(){let p=zodexConfigPathModule(),fs=zodexConfigFsModule(),e=process.env.CODEX_LINUX_FEATURES_DIR;if(typeof e===\`string\`&&e.trim()){let target=p.join(e.trim(),\`zodex-modules\`,\`config.js\`);if(fs.existsSync(target))return target;throw Error(\`CODEX_LINUX_FEATURES_DIR is invalid: \`+e)}let app=process.env.CODEX_LINUX_APP_DIR;if(typeof app===\`string\`&&app.trim()){let target=p.join(app.trim(),\`.codex-linux\`,\`features\`,\`zodex-modules\`,\`config.js\`);if(fs.existsSync(target))return target}let res=process.resourcesPath;if(typeof res===\`string\`&&res.trim()){let target=p.join(res.trim(),\`..\`,\`.codex-linux\`,\`features\`,\`zodex-modules\`,\`config.js\`);if(fs.existsSync(target))return target}return null}`,
+    `function zodexConfigModule(){let target=zodexConfigModulePath();return target?require(target):null}`,
+    `function zodexModuleStatus(){try{let m=zodexConfigModule();if(!m){let cf=process.env.ZODEX_CONFIG_FILE;if(typeof cf===\`string\`&&cf.trim())return{ok:!1,state:\`invalid\`,file:cf.trim(),error:\`Zodex module configuration helper is unavailable\`,connections:[]};return{ok:!0,state:\`missing\`,file:null,connections:[]}}let r=m.readConfig(process.env);if(r.state!==\`valid\`)return{ok:r.state!==\`invalid\`,state:r.state,file:r.file,error:r.error,connections:[]};return{ok:!0,state:\`valid\`,file:r.file,connections:m.brokerConnectionStates(r.config)}}catch(e){return{ok:!1,state:\`invalid\`,file:null,error:String(e?.message||e),connections:[]}}}`,
   ].join("");
 }
 
