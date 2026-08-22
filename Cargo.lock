@@ -542,6 +542,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-privileged-exec-linux"
+version = "0.1.0-linux-research1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hex",
+ "libc",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "codex-read-aloud-linux"
 version = "0.1.0-linux-alpha1"
 dependencies = [
