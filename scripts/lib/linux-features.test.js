@@ -33,6 +33,7 @@ test("known retired feature ids are ignored while arbitrary unknown ids fail", (
       "conversation-mode",
       "deferred-update-build",
       "example-feature",
+      "interactive-console",
       "open-target-discovery",
       "ssh-command-wrapper",
       "x11-ewmh-computer-use",
