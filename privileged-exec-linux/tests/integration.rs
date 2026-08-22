@@ -3,10 +3,12 @@
 //! These tests exercise the full `run_structured` path including process group
 //! ownership, output bounds, cancellation, and deadline semantics.
 
+#[cfg(feature = "process-control")]
+use codex_privileged_exec_linux::runner::{cancel_pair, run_structured, ExecRequest};
 use codex_privileged_exec_linux::{
     collect_output, invocation_digest,
     output::{BoundedOutput, OutputLimits, REDACTED_MARKER},
-    runner::{cancel_pair, run_structured, ExecRequest, DEADLINE_SECONDS},
+    runner::DEADLINE_SECONDS,
 };
 
 // ---------------------------------------------------------------------------
@@ -19,32 +21,36 @@ fn digest_is_stable_across_calls() {
         "/bin/sh",
         &["-c".to_string(), "echo hi".to_string()],
         "/tmp",
-    );
+        "reason",
+    )
+    .unwrap();
     let d2 = invocation_digest(
         "/bin/sh",
         &["-c".to_string(), "echo hi".to_string()],
         "/tmp",
-    );
+        "reason",
+    )
+    .unwrap();
     assert_eq!(d1, d2);
 }
 
 #[test]
 fn digest_differs_on_distinct_argv() {
-    let d1 = invocation_digest("/usr/bin/ls", &[], "/home");
-    let d2 = invocation_digest("/usr/bin/ls", &["-la".to_string()], "/home");
+    let d1 = invocation_digest("/usr/bin/ls", &[], "/home", "test").unwrap();
+    let d2 = invocation_digest("/usr/bin/ls", &["-la".to_string()], "/home", "test").unwrap();
     assert_ne!(d1, d2);
 }
 
 #[test]
 fn digest_differs_on_distinct_cwd() {
-    let d1 = invocation_digest("/usr/bin/ls", &[], "/tmp");
-    let d2 = invocation_digest("/usr/bin/ls", &[], "/var");
+    let d1 = invocation_digest("/usr/bin/ls", &[], "/tmp", "test").unwrap();
+    let d2 = invocation_digest("/usr/bin/ls", &[], "/var", "test").unwrap();
     assert_ne!(d1, d2);
 }
 
 #[test]
 fn digest_hex_length_is_64() {
-    let d = invocation_digest("/usr/bin/ls", &[], "/tmp");
+    let d = invocation_digest("/usr/bin/ls", &[], "/tmp", "test").unwrap();
     assert_eq!(d.len(), 64);
 }
 
@@ -58,7 +64,7 @@ fn output_collect_no_truncation_under_limit() {
     let limits = OutputLimits { max_bytes: 128 };
     collect_output(b"short output", &mut out, limits);
     assert!(!out.truncated);
-    assert_eq!(out.text, "short output");
+    assert_eq!(out.text, b"short output");
 }
 
 #[test]
@@ -73,7 +79,7 @@ fn output_collect_truncation_at_limit() {
 #[test]
 fn output_display_has_redacted_marker_when_truncated() {
     let out = BoundedOutput {
-        text: "xyz".to_string(),
+        text: b"xyz".to_vec(),
         truncated: true,
         total_bytes: 100,
     };
@@ -84,7 +90,7 @@ fn output_display_has_redacted_marker_when_truncated() {
 #[test]
 fn output_display_no_marker_when_complete() {
     let out = BoundedOutput {
-        text: "xyz".to_string(),
+        text: b"xyz".to_vec(),
         truncated: false,
         total_bytes: 3,
     };
@@ -96,6 +102,7 @@ fn output_display_no_marker_when_complete() {
 // Runner integration tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "process-control")]
 #[tokio::test]
 async fn runner_executes_true_and_reports_ok() {
     let req = ExecRequest {
@@ -113,6 +120,7 @@ async fn runner_executes_true_and_reports_ok() {
     assert!(!outcome.cancelled);
 }
 
+#[cfg(feature = "process-control")]
 #[tokio::test]
 async fn runner_captures_stdout_correctly() {
     let req = ExecRequest {
@@ -132,6 +140,7 @@ async fn runner_captures_stdout_correctly() {
     );
 }
 
+#[cfg(feature = "process-control")]
 #[tokio::test]
 async fn runner_non_zero_exit_is_not_ok() {
     let req = ExecRequest {
@@ -147,6 +156,7 @@ async fn runner_non_zero_exit_is_not_ok() {
     assert_ne!(outcome.exit_code, Some(0));
 }
 
+#[cfg(feature = "process-control")]
 #[tokio::test]
 async fn runner_fails_on_nonexistent_executable() {
     let req = ExecRequest {
@@ -160,6 +170,7 @@ async fn runner_fails_on_nonexistent_executable() {
     assert!(result.is_err(), "expected Err for nonexistent binary");
 }
 
+#[cfg(feature = "process-control")]
 #[tokio::test]
 async fn runner_cancellation_stops_long_running_process() {
     let (tx, rx) = cancel_pair();
@@ -180,6 +191,7 @@ async fn runner_cancellation_stops_long_running_process() {
     assert!(!outcome.timed_out);
 }
 
+#[cfg(feature = "process-control")]
 #[tokio::test]
 async fn runner_output_truncated_with_marker() {
     let limits = OutputLimits { max_bytes: 8 };
@@ -198,24 +210,43 @@ async fn runner_output_truncated_with_marker() {
     );
 }
 
+#[cfg(feature = "process-control")]
 #[tokio::test]
 async fn runner_invocation_digest_matches_standalone() {
     let exe = "/usr/bin/true";
     let argv: Vec<String> = vec![];
     let cwd = "/tmp";
+    let reason = "digest integration test";
     let req = ExecRequest {
         executable: exe.to_string(),
         argv: argv.clone(),
         cwd: cwd.to_string(),
-        reason: "digest integration test".to_string(),
+        reason: reason.to_string(),
     };
     let outcome = run_structured(&req, None, OutputLimits::default())
         .await
         .unwrap();
-    let expected = invocation_digest(exe, &argv, cwd);
+
+    // Test requires matching canonicalized form exactly as the runner would prepare it
+    let expected = invocation_digest(
+        &std::fs::canonicalize(exe)
+            .unwrap()
+            .into_os_string()
+            .into_string()
+            .unwrap(),
+        &argv,
+        &std::fs::canonicalize(cwd)
+            .unwrap()
+            .into_os_string()
+            .into_string()
+            .unwrap(),
+        reason,
+    )
+    .unwrap();
     assert_eq!(outcome.invocation_digest, expected);
 }
 
+#[cfg(feature = "process-control")]
 #[tokio::test]
 async fn runner_rejects_shell_string_as_executable() {
     // Shell injection attempt: passing a command string where an absolute path

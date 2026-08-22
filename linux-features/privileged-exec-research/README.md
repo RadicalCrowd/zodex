@@ -17,6 +17,17 @@ review and implementation milestone authorizes them.
 
 ## Safety boundary
 
+- Accepts `{executable, argv, cwd, reason}` structured input only.
+- Strict limit bounds are placed on request payloads.
+- Validates executable and cwd using `fs::metadata` and rejects ambiguous paths containing control characters, line breaks, or directory traversal characters.
+- Executes only the fully canonicalized absolute representation of paths directly.
+- Does not expose arbitrary shell environments or stdin processing. Inherited environment is fully cleared.
+- Requires standard regular executable file and directory configurations.
+- Execution operates within a segregated process group (`process_group(0)`) utilizing checked `pid_t` conversions.
+- Cancellation and 5-minute timeout hard-kill the whole pgid and return currently-read bounded output safely rather than dropping data.
+- Structured execution payload securely binds the advisory `reason` field internally inside the computed SHA-256 invocation digest. Serialization errors on this digest bubble up deterministically.
+- Errors during parsing, digest, initialization and process lifetime always fail-closed without panics.
+- MCP interface logic is completely feature-gated to the `process-control` Linux system requirement.
 - The feature remains disabled unless `privileged-exec-research` is explicitly
   listed in the Linux features configuration.
 - Its future daemon and native key material must use a separate namespace from

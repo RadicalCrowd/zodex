@@ -13,11 +13,12 @@ use rmcp::{
     },
     model::{Implementation, ServerCapabilities, ServerInfo},
     schemars::JsonSchema,
-    tool, tool_router, ServerHandler, ServiceExt,
+    tool, tool_router, ServerHandler,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use serde::Deserialize;
+
+#[cfg(feature = "process-control")]
+use rmcp::ServiceExt;
 use std::sync::Arc;
 
 use crate::{
@@ -51,25 +52,42 @@ struct ExecParams {
 // Response helpers
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-struct ToolResponse {
-    #[serde(flatten)]
-    fields: BTreeMap<String, Value>,
+pub fn error_json(reason: &str) -> Json<ExecResponse> {
+    Json(ExecResponse {
+        ok: false,
+        exit_code: None,
+        stdout: None,
+        stderr: None,
+        stdout_truncated: None,
+        stderr_truncated: None,
+        timed_out: None,
+        cancelled: None,
+        invocation_digest: None,
+        error: Some(reason.to_string()),
+    })
 }
 
-fn tool_json(value: Value) -> Json<ToolResponse> {
-    let fields = match value {
-        Value::Object(map) => map.into_iter().collect(),
-        other => BTreeMap::from([("value".to_string(), other)]),
-    };
-    Json(ToolResponse { fields })
-}
-
-fn error_json(reason: &str) -> Json<ToolResponse> {
-    tool_json(json!({
-        "ok": false,
-        "error": reason,
-    }))
+#[derive(Debug, Clone, serde::Serialize, rmcp::schemars::JsonSchema, serde::Deserialize)]
+pub struct ExecResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_out: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancelled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invocation_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +130,7 @@ impl PrivilegedExecServer {
             Output is bounded; deadline is five minutes. \
             Returns {ok, exit_code, stdout, stderr, invocation_digest, timed_out, cancelled}."
     )]
-    async fn exec(&self, Parameters(params): Parameters<ExecParams>) -> Json<ToolResponse> {
+    async fn exec(&self, Parameters(params): Parameters<ExecParams>) -> Json<ExecResponse> {
         let request = ExecRequest {
             executable: params.executable,
             argv: params.argv,
@@ -122,30 +140,47 @@ impl PrivilegedExecServer {
 
         // Pre-validate and emit the digest before executing so the caller can
         // correlate requests even when execution fails.
-        if let Err(e) = request.validate() {
-            return error_json(&format!("invalid request: {e}"));
-        }
-        let digest = invocation_digest(&request.executable, &request.argv, &request.cwd);
+        let request = match request.validate_and_canonicalize() {
+            Ok(r) => r,
+            Err(e) => return error_json(&format!("invalid request: {e}")),
+        };
+        let digest = match invocation_digest(
+            &request.executable,
+            &request.argv,
+            &request.cwd,
+            &request.reason,
+        ) {
+            Ok(d) => d,
+            Err(e) => return error_json(&format!("failed to compute invocation digest: {e}")),
+        };
 
         let limits = OutputLimits::default();
         // No cancellation wired from the MCP layer yet; pass None.
         match run_structured(&request, None, limits).await {
-            Ok(outcome) => tool_json(json!({
-                "ok": outcome.ok,
-                "invocation_digest": digest,
-                "exit_code": outcome.exit_code,
-                "stdout": outcome.stdout,
-                "stderr": outcome.stderr,
-                "stdout_truncated": outcome.stdout_truncated,
-                "stderr_truncated": outcome.stderr_truncated,
-                "timed_out": outcome.timed_out,
-                "cancelled": outcome.cancelled,
-            })),
-            Err(e) => tool_json(json!({
-                "ok": false,
-                "invocation_digest": digest,
-                "error": e.to_string(),
-            })),
+            Ok(outcome) => Json(ExecResponse {
+                ok: outcome.ok,
+                invocation_digest: Some(digest),
+                exit_code: outcome.exit_code,
+                stdout: Some(outcome.stdout),
+                stderr: Some(outcome.stderr),
+                stdout_truncated: Some(outcome.stdout_truncated),
+                stderr_truncated: Some(outcome.stderr_truncated),
+                timed_out: Some(outcome.timed_out),
+                cancelled: Some(outcome.cancelled),
+                error: None,
+            }),
+            Err(e) => Json(ExecResponse {
+                ok: false,
+                invocation_digest: Some(digest),
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+                stdout_truncated: None,
+                stderr_truncated: None,
+                timed_out: None,
+                cancelled: None,
+                error: Some(e.to_string()),
+            }),
         }
     }
 }
@@ -167,6 +202,9 @@ impl ServerHandler for PrivilegedExecServer {
 }
 
 /// Serve the MCP protocol over stdio until the client disconnects.
+/// Activation ownership is managed externally. There is no active listener,
+/// this only communicates via stdio.
+#[cfg(feature = "process-control")]
 pub async fn serve_mcp() -> Result<()> {
     let service = PrivilegedExecServer::default();
     service
@@ -175,6 +213,11 @@ pub async fn serve_mcp() -> Result<()> {
         .waiting()
         .await?;
     Ok(())
+}
+
+#[cfg(not(feature = "process-control"))]
+pub async fn serve_mcp() -> Result<()> {
+    anyhow::bail!("MCP execution surface requires the process-control feature")
 }
 
 #[cfg(test)]
@@ -198,11 +241,12 @@ mod tests {
             reason: "test".to_string(),
         };
         let result = server.exec(Parameters(params)).await;
-        let fields = result.0.fields;
-        assert_eq!(fields["ok"].as_bool(), Some(false));
-        assert!(fields.contains_key("error"));
+
+        assert!(!result.0.ok);
+        assert!(result.0.error.is_some());
     }
 
+    #[cfg(feature = "process-control")]
     #[tokio::test]
     async fn exec_tool_succeeds_with_valid_request() {
         let server = PrivilegedExecServer::default();
@@ -213,11 +257,13 @@ mod tests {
             reason: "mcp smoke test".to_string(),
         };
         let result = server.exec(Parameters(params)).await;
-        let fields = result.0.fields;
-        assert_eq!(fields["ok"].as_bool(), Some(true));
-        assert!(fields.contains_key("invocation_digest"));
-        assert!(!fields["invocation_digest"]
-            .as_str()
+
+        assert!(result.0.ok);
+        assert!(result.0.invocation_digest.is_some());
+        assert!(!result
+            .0
+            .invocation_digest
+            .as_deref()
             .unwrap_or("")
             .is_empty());
     }
@@ -232,8 +278,8 @@ mod tests {
             reason: "test".to_string(),
         };
         let result = server.exec(Parameters(params)).await;
-        let fields = result.0.fields;
+
         // validation fails before digest emission for relative path
-        assert_eq!(fields["ok"].as_bool(), Some(false));
+        assert!(!result.0.ok);
     }
 }

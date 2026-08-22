@@ -17,17 +17,27 @@
 use anyhow::{bail, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::fs;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Component, Path, PathBuf};
+#[cfg(feature = "process-control")]
 use tokio::{
     io::{AsyncReadExt, BufReader},
     process::Command,
-    time::{timeout, Duration},
+    time::Duration,
 };
 
-use crate::output::{collect_output, BoundedOutput, OutputLimits};
+use crate::output::OutputLimits;
+#[cfg(feature = "process-control")]
+use crate::output::{collect_output, BoundedOutput};
 
 /// Hard deadline: five minutes.
 pub const DEADLINE_SECONDS: u64 = 5 * 60;
+const MAX_PATH_BYTES: usize = 4096;
+const MAX_REASON_BYTES: usize = 1024;
+const MAX_ARG_COUNT: usize = 256;
+const MAX_ARG_BYTES: usize = 16 * 1024;
+const MAX_ARGV_BYTES: usize = 128 * 1024;
 
 /// Structured request with no shell strings, no environment overrides.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -45,28 +55,100 @@ pub struct ExecRequest {
 }
 
 impl ExecRequest {
-    /// Validate the request fields without executing anything.
-    pub fn validate(&self) -> Result<()> {
-        if self.executable.trim().is_empty() {
-            bail!("executable must not be empty");
+    /// Validate the request and replace its paths with the exact canonical
+    /// paths that will be included in the digest and executed.
+    pub fn validate_and_canonicalize(self) -> Result<Self> {
+        validate_display_text("reason", &self.reason, MAX_REASON_BYTES, false)?;
+        if self.argv.len() > MAX_ARG_COUNT {
+            bail!("argv contains too many arguments");
         }
-        if !self.executable.starts_with('/') {
-            bail!(
-                "executable must be an absolute path; got {:?}",
-                self.executable
-            );
+        let mut total_argv_len = 0usize;
+        for arg in &self.argv {
+            validate_display_text("argv item", arg, MAX_ARG_BYTES, true)?;
+            total_argv_len = total_argv_len
+                .checked_add(arg.len())
+                .ok_or_else(|| anyhow::anyhow!("total argv length overflow"))?;
         }
-        if self.cwd.trim().is_empty() {
-            bail!("cwd must not be empty");
+        if total_argv_len > MAX_ARGV_BYTES {
+            bail!("total argv length too large");
         }
-        if !self.cwd.starts_with('/') {
-            bail!("cwd must be an absolute path; got {:?}", self.cwd);
+
+        let exec_path = validate_unambiguous_absolute_path("executable", &self.executable)?;
+        let cwd_path = validate_unambiguous_absolute_path("cwd", &self.cwd)?;
+        let can_exec = fs::canonicalize(&exec_path).context("failed to canonicalize executable")?;
+        let can_cwd = fs::canonicalize(&cwd_path).context("failed to canonicalize cwd")?;
+
+        let exec_meta = fs::metadata(&can_exec).context("failed to get executable metadata")?;
+        if !exec_meta.is_file() {
+            bail!("executable is not a regular file");
         }
-        if self.reason.trim().is_empty() {
-            bail!("reason must not be empty");
+        if exec_meta.mode() & 0o111 == 0 {
+            bail!("executable does not have execute permissions");
         }
-        Ok(())
+
+        let cwd_meta = fs::metadata(&can_cwd).context("failed to get cwd metadata")?;
+        if !cwd_meta.is_dir() {
+            bail!("cwd is not a directory");
+        }
+
+        let exec_str = can_exec
+            .into_os_string()
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("executable canonical path is not valid UTF-8"))?;
+        let cwd_str = can_cwd
+            .into_os_string()
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("cwd canonical path is not valid UTF-8"))?;
+
+        Ok(Self {
+            executable: exec_str,
+            argv: self.argv,
+            cwd: cwd_str,
+            reason: self.reason,
+        })
     }
+}
+
+fn validate_display_text(
+    name: &str,
+    value: &str,
+    max_bytes: usize,
+    allow_empty: bool,
+) -> Result<()> {
+    if (!allow_empty && value.is_empty()) || value.len() > max_bytes {
+        bail!("{name} is empty or exceeds its byte limit");
+    }
+    if value.chars().any(char::is_control) {
+        bail!("{name} contains a control character");
+    }
+    if !allow_empty && value.trim() != value {
+        bail!("{name} contains ambiguous surrounding whitespace");
+    }
+    Ok(())
+}
+
+fn validate_unambiguous_absolute_path(name: &str, value: &str) -> Result<PathBuf> {
+    validate_display_text(name, value, MAX_PATH_BYTES, false)?;
+    if value.contains("//") || (value != "/" && value.ends_with('/')) {
+        bail!("{name} is not a normalized path");
+    }
+    if value
+        .split('/')
+        .any(|segment| segment == "." || segment == "..")
+    {
+        bail!("{name} contains a relative or ambiguous component");
+    }
+    let path = Path::new(value);
+    if !path.is_absolute() {
+        bail!("{name} must be an absolute path; got {value:?}");
+    }
+    if path
+        .components()
+        .any(|component| !matches!(component, Component::RootDir | Component::Normal(_)))
+    {
+        bail!("{name} contains a relative or ambiguous component");
+    }
+    Ok(path.to_path_buf())
 }
 
 /// Token for cooperative cancellation.  Drop or send `true` to cancel.
@@ -103,84 +185,87 @@ pub async fn run_structured(
     cancel: Option<CancelReceiver>,
     limits: OutputLimits,
 ) -> Result<ExecOutcome> {
-    request.validate()?;
+    #[cfg(not(feature = "process-control"))]
+    {
+        let _ = request;
+        let _ = cancel;
+        let _ = limits;
+        bail!("execution is unavailable without the process-control feature");
+    }
+    #[cfg(feature = "process-control")]
+    {
+        let request = request.clone().validate_and_canonicalize()?;
 
-    let digest = crate::invocation_digest(&request.executable, &request.argv, &request.cwd);
-    let deadline = Duration::from_secs(DEADLINE_SECONDS);
+        let digest = crate::invocation_digest(
+            &request.executable,
+            &request.argv,
+            &request.cwd,
+            &request.reason,
+        )
+        .context("failed to compute invocation digest")?;
+        let deadline = Duration::from_secs(DEADLINE_SECONDS);
 
-    let mut cmd = Command::new(&request.executable);
-    cmd.args(&request.argv)
-        .current_dir(PathBuf::from(&request.cwd))
-        // stdin is /dev/null: no caller data reaches the child.
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        // Place the child in its own process group so kill(-pgid) is reliable.
-        .process_group(0);
+        let mut cmd = Command::new(&request.executable);
+        cmd.args(&request.argv)
+            .current_dir(PathBuf::from(&request.cwd))
+            .env_clear()
+            .env("LC_ALL", "C")
+            // stdin is /dev/null: no caller data reaches the child.
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            // Place the child in its own process group so kill(-pgid) is reliable.
+            .process_group(0);
 
-    let mut child = cmd.spawn().context("failed to spawn child process")?;
-    let pid = child
-        .id()
-        .context("child exited immediately before pid was read")?;
-    let pgid = pid; // setsid(0) → new group leader == pid
+        let mut child = cmd.spawn().context("failed to spawn child process")?;
+        let pid = child
+            .id()
+            .context("child exited immediately before pid was read")?;
+        let pgid = i32::try_from(pid).context("pid does not fit in i32")?; // setpgid(0) → new group leader == pid
 
-    // Collect output concurrently with a hard deadline.
-    let stdout_handle = child.stdout.take().context("stdout pipe missing")?;
-    let stderr_handle = child.stderr.take().context("stderr pipe missing")?;
+        // Collect output concurrently with a hard deadline.
+        let stdout_handle = child.stdout.take().context("stdout pipe missing")?;
+        let stderr_handle = child.stderr.take().context("stderr pipe missing")?;
 
-    let result = timeout(
-        deadline,
-        collect_child(
+        let result = collect_child(
+            deadline,
             child,
             stdout_handle,
             stderr_handle,
             limits,
             cancel,
-            pgid as i32,
-        ),
-    )
-    .await;
+            pgid,
+        )
+        .await;
 
-    match result {
-        Ok(Ok((exit_code, stdout_out, stderr_out, cancelled))) => Ok(ExecOutcome {
-            ok: exit_code == Some(0) && !cancelled,
-            exit_code,
-            stdout: stdout_out.clone().into_display(),
-            stderr: stderr_out.clone().into_display(),
-            stdout_truncated: stdout_out.truncated,
-            stderr_truncated: stderr_out.truncated,
-            timed_out: false,
-            cancelled,
-            invocation_digest: digest,
-        }),
-        Ok(Err(e)) => Err(e),
-        Err(_elapsed) => {
-            // Deadline fired: kill the entire process group.
-            kill_process_group(pgid as i32);
-            Ok(ExecOutcome {
-                ok: false,
-                exit_code: None,
-                stdout: String::new(),
-                stderr: String::new(),
-                stdout_truncated: false,
-                stderr_truncated: false,
-                timed_out: true,
-                cancelled: false,
+        match result {
+            Ok((exit_code, stdout_out, stderr_out, cancelled, timed_out)) => Ok(ExecOutcome {
+                ok: exit_code == Some(0) && !cancelled,
+                exit_code,
+                stdout: stdout_out.clone().into_display(),
+                stderr: stderr_out.clone().into_display(),
+                stdout_truncated: stdout_out.truncated,
+                stderr_truncated: stderr_out.truncated,
+                timed_out,
+                cancelled,
                 invocation_digest: digest,
-            })
+            }),
+            Err(e) => Err(e),
         }
     }
 }
 
 /// Drive the child to completion, collecting output and watching for cancel.
+#[cfg(feature = "process-control")]
 async fn collect_child(
+    deadline: Duration,
     mut child: tokio::process::Child,
     stdout_pipe: tokio::process::ChildStdout,
     stderr_pipe: tokio::process::ChildStderr,
     limits: OutputLimits,
     mut cancel: Option<CancelReceiver>,
     pgid: i32,
-) -> Result<(Option<i32>, BoundedOutput, BoundedOutput, bool)> {
+) -> Result<(Option<i32>, BoundedOutput, BoundedOutput, bool, bool)> {
     let mut stdout_out = BoundedOutput::default();
     let mut stderr_out = BoundedOutput::default();
 
@@ -191,22 +276,35 @@ async fn collect_child(
     let mut stderr_buf = vec![0u8; 4096];
     let mut stdout_done = false;
     let mut stderr_done = false;
+    let sleep = tokio::time::sleep(deadline);
+    tokio::pin!(sleep);
 
     loop {
-        // Check cancellation.
-        if let Some(ref mut rx) = cancel {
-            if *rx.borrow() {
-                kill_process_group(pgid);
-                let _ = child.wait().await;
-                return Ok((None, stdout_out, stderr_out, true));
+        if stdout_done && stderr_done {
+            tokio::select! {
+                status = child.wait() => {
+                    let status = status.context("failed to wait for child")?;
+                    return Ok((status.code(), stdout_out, stderr_out, false, false));
+                }
+                _ = &mut sleep => {
+                    kill_process_group(pgid);
+                    let _ = child.wait().await;
+                    return Ok((None, stdout_out, stderr_out, false, true));
+                }
+                _ = wait_for_cancel(&mut cancel) => {
+                    kill_process_group(pgid);
+                    let _ = child.wait().await;
+                    return Ok((None, stdout_out, stderr_out, true, false));
+                }
             }
         }
 
-        if stdout_done && stderr_done {
-            break;
-        }
-
         tokio::select! {
+            _ = &mut sleep => {
+                kill_process_group(pgid);
+                let _ = child.wait().await;
+                return Ok((None, stdout_out, stderr_out, false, true));
+            }
             n = stdout_reader.read(&mut stdout_buf), if !stdout_done => {
                 match n {
                     Ok(0) => stdout_done = true,
@@ -221,16 +319,34 @@ async fn collect_child(
                     Err(_) => stderr_done = true,
                 }
             }
+            _ = wait_for_cancel(&mut cancel) => {
+                kill_process_group(pgid);
+                let _ = child.wait().await;
+                return Ok((None, stdout_out, stderr_out, true, false));
+            }
         }
     }
+}
 
-    let status = child.wait().await.context("failed to wait for child")?;
-    let exit_code = status.code();
-    Ok((exit_code, stdout_out, stderr_out, false))
+#[cfg(feature = "process-control")]
+async fn wait_for_cancel(cancel: &mut Option<CancelReceiver>) {
+    let Some(receiver) = cancel.as_mut() else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    if *receiver.borrow() {
+        return;
+    }
+    loop {
+        if receiver.changed().await.is_err() || *receiver.borrow() {
+            return;
+        }
+    }
 }
 
 /// Send SIGKILL to the entire process group.  Fail-closed: errors are ignored
 /// because the group may have already exited.
+#[cfg(feature = "process-control")]
 fn kill_process_group(pgid: i32) {
     // Safety: kill(2) is always safe to call with a valid pgid; negative pgid
     // addresses the group.  ESRCH is ignored.
@@ -251,7 +367,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             reason: "test".to_string(),
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate_and_canonicalize().is_err());
     }
 
     #[test]
@@ -262,7 +378,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             reason: "test".to_string(),
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate_and_canonicalize().is_err());
     }
 
     #[test]
@@ -273,7 +389,7 @@ mod tests {
             cwd: "".to_string(),
             reason: "test".to_string(),
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate_and_canonicalize().is_err());
     }
 
     #[test]
@@ -284,7 +400,7 @@ mod tests {
             cwd: "tmp".to_string(),
             reason: "test".to_string(),
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate_and_canonicalize().is_err());
     }
 
     #[test]
@@ -295,7 +411,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             reason: "".to_string(),
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate_and_canonicalize().is_err());
     }
 
     #[test]
@@ -306,9 +422,73 @@ mod tests {
             cwd: "/tmp".to_string(),
             reason: "list files".to_string(),
         };
-        assert!(req.validate().is_ok());
+        assert!(req.validate_and_canonicalize().is_ok());
     }
 
+    #[test]
+    fn validate_rejects_ambiguous_paths() {
+        for executable in [
+            "/usr//bin/ls",
+            "/usr/./bin/ls",
+            "/usr/../bin/ls",
+            "/usr/bin/ls/",
+            " /usr/bin/ls",
+            "/usr/bin/ls\n",
+        ] {
+            let req = ExecRequest {
+                executable: executable.to_string(),
+                argv: vec![],
+                cwd: "/tmp".to_string(),
+                reason: "path validation".to_string(),
+            };
+            assert!(req.validate_and_canonicalize().is_err(), "{executable}");
+        }
+        assert!(validate_unambiguous_absolute_path("path", "/tmp/file..name").is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unbounded_or_ambiguous_text() {
+        let too_many_args = ExecRequest {
+            executable: "/usr/bin/true".to_string(),
+            argv: vec![String::new(); MAX_ARG_COUNT + 1],
+            cwd: "/tmp".to_string(),
+            reason: "bounds".to_string(),
+        };
+        assert!(too_many_args.validate_and_canonicalize().is_err());
+
+        let control_arg = ExecRequest {
+            executable: "/usr/bin/true".to_string(),
+            argv: vec!["ambiguous\nargument".to_string()],
+            cwd: "/tmp".to_string(),
+            reason: "bounds".to_string(),
+        };
+        assert!(control_arg.validate_and_canonicalize().is_err());
+
+        let padded_reason = ExecRequest {
+            executable: "/usr/bin/true".to_string(),
+            argv: vec![],
+            cwd: "/tmp".to_string(),
+            reason: " padded reason ".to_string(),
+        };
+        assert!(padded_reason.validate_and_canonicalize().is_err());
+    }
+
+    #[cfg(not(feature = "process-control"))]
+    #[tokio::test]
+    async fn run_structured_is_disabled_without_process_control() {
+        let req = ExecRequest {
+            executable: "/usr/bin/true".to_string(),
+            argv: vec![],
+            cwd: "/tmp".to_string(),
+            reason: "feature gate".to_string(),
+        };
+        let error = run_structured(&req, None, OutputLimits::default())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("process-control"));
+    }
+
+    #[cfg(feature = "process-control")]
     #[tokio::test]
     async fn run_structured_captures_stdout() {
         let req = ExecRequest {
@@ -327,6 +507,7 @@ mod tests {
         assert!(!outcome.cancelled);
     }
 
+    #[cfg(feature = "process-control")]
     #[tokio::test]
     async fn run_structured_non_zero_exit_is_not_ok() {
         let req = ExecRequest {
@@ -342,6 +523,7 @@ mod tests {
         assert_ne!(outcome.exit_code, Some(0));
     }
 
+    #[cfg(feature = "process-control")]
     #[tokio::test]
     async fn run_structured_cancel_short_circuits() {
         let (tx, rx) = cancel_pair();
@@ -360,6 +542,7 @@ mod tests {
         assert!(outcome.cancelled);
     }
 
+    #[cfg(feature = "process-control")]
     #[tokio::test]
     async fn run_structured_output_truncated_at_limit() {
         let limits = OutputLimits { max_bytes: 5 };
@@ -387,6 +570,7 @@ mod tests {
             .is_err());
     }
 
+    #[cfg(feature = "process-control")]
     #[tokio::test]
     async fn invocation_digest_in_outcome_matches_standalone() {
         let req = ExecRequest {
@@ -398,7 +582,8 @@ mod tests {
         let outcome = run_structured(&req, None, OutputLimits::default())
             .await
             .unwrap();
-        let expected = crate::invocation_digest("/usr/bin/true", &[], "/tmp");
+        let expected =
+            crate::invocation_digest("/usr/bin/true", &[], "/tmp", "digest check").unwrap();
         assert_eq!(outcome.invocation_digest, expected);
     }
 }

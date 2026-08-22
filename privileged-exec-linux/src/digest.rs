@@ -1,9 +1,9 @@
 //! Canonical invocation digest: SHA-256 over a deterministic JSON representation
 //! of the structured request fields that affect execution identity.
 //!
-//! The digest covers `{executable, argv, cwd}` in sorted-key JSON so two
-//! logically-identical requests always produce the same hex digest.  `reason`
-//! is intentionally excluded because it is advisory text only.
+//! The digest covers `{executable, argv, cwd, reason}` in sorted-key JSON so
+//! the exact action and the human-readable justification shown for approval
+//! cannot be changed independently.
 
 use sha2::{Digest, Sha256};
 
@@ -11,8 +11,13 @@ use sha2::{Digest, Sha256};
 ///
 /// Inputs must already be validated (non-empty executable, absolute cwd).
 /// The digest is computed over the canonical, sorted-key JSON object:
-/// `{"argv":[...],"cwd":"...","executable":"..."}`.
-pub fn invocation_digest(executable: &str, argv: &[String], cwd: &str) -> String {
+/// `{"argv":[...],"cwd":"...","executable":"...","reason":"..."}`.
+pub fn invocation_digest(
+    executable: &str,
+    argv: &[String],
+    cwd: &str,
+    reason: &str,
+) -> anyhow::Result<String> {
     // Build sorted-key JSON manually so serde_json field ordering matches
     // the alphabetically-sorted contract documented above.
     let argv_json: Vec<serde_json::Value> = argv
@@ -23,15 +28,15 @@ pub fn invocation_digest(executable: &str, argv: &[String], cwd: &str) -> String
         "argv": argv_json,
         "cwd": cwd,
         "executable": executable,
+        "reason": reason,
     });
     // serde_json serializes object keys in insertion order for Value::Object
     // built from json!(), which uses IndexMap preserving sort.  To guarantee
     // determinism regardless of the internal map, we sort manually here.
     let sorted = sorted_value(canonical);
-    let serialized =
-        serde_json::to_string(&sorted).expect("canonical value is always serializable");
+    let serialized = serde_json::to_string(&sorted)?;
     let hash = Sha256::digest(serialized.as_bytes());
-    hex::encode(hash)
+    Ok(hex::encode(hash))
 }
 
 /// Recursively sort object keys so serialization is deterministic.
@@ -62,50 +67,48 @@ mod tests {
 
     #[test]
     fn digest_is_deterministic() {
-        let d1 = invocation_digest("/usr/bin/id", &[], "/tmp");
-        let d2 = invocation_digest("/usr/bin/id", &[], "/tmp");
+        let d1 = invocation_digest("/usr/bin/id", &[], "/tmp", "test").unwrap();
+        let d2 = invocation_digest("/usr/bin/id", &[], "/tmp", "test").unwrap();
         assert_eq!(d1, d2);
     }
 
     #[test]
     fn digest_is_hex_sha256_length() {
-        let d = invocation_digest("/usr/bin/id", &[], "/tmp");
+        let d = invocation_digest("/usr/bin/id", &[], "/tmp", "test").unwrap();
         assert_eq!(d.len(), 64);
         assert!(d.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
     fn digest_changes_with_different_executable() {
-        let d1 = invocation_digest("/usr/bin/id", &[], "/tmp");
-        let d2 = invocation_digest("/usr/bin/env", &[], "/tmp");
+        let d1 = invocation_digest("/usr/bin/id", &[], "/tmp", "test").unwrap();
+        let d2 = invocation_digest("/usr/bin/env", &[], "/tmp", "test").unwrap();
         assert_ne!(d1, d2);
     }
 
     #[test]
     fn digest_changes_with_different_argv() {
-        let d1 = invocation_digest("/usr/bin/ls", &[], "/tmp");
-        let d2 = invocation_digest("/usr/bin/ls", &["-la".to_string()], "/tmp");
+        let d1 = invocation_digest("/usr/bin/ls", &[], "/tmp", "test").unwrap();
+        let d2 = invocation_digest("/usr/bin/ls", &["-la".to_string()], "/tmp", "test").unwrap();
         assert_ne!(d1, d2);
     }
 
     #[test]
-    fn digest_is_independent_of_reason() {
-        // reason is excluded from the digest by design
-        let d1 = invocation_digest("/usr/bin/id", &[], "/tmp");
-        // Confirm that the same call with no reason produces the same digest
-        // (reason not passed to this function).
-        let d2 = invocation_digest("/usr/bin/id", &[], "/tmp");
-        assert_eq!(d1, d2);
+    fn digest_changes_with_different_reason() {
+        // reason is securely bound into the digest by design
+        let d1 = invocation_digest("/usr/bin/id", &[], "/tmp", "test").unwrap();
+        let d2 = invocation_digest("/usr/bin/id", &[], "/tmp", "test2").unwrap();
+        assert_ne!(d1, d2);
     }
 
     #[test]
     fn digest_matches_known_value() {
         // Regression anchor: the known digest for `/usr/bin/true [] /tmp`.
-        // Recomputed manually: SHA-256 of `{"argv":[],"cwd":"/tmp","executable":"/usr/bin/true"}`
-        let d = invocation_digest("/usr/bin/true", &[], "/tmp");
+        // Recomputed manually: SHA-256 of `{"argv":[],"cwd":"/tmp","executable":"/usr/bin/true","reason":"test"}`
+        let d = invocation_digest("/usr/bin/true", &[], "/tmp", "test").unwrap();
         // Re-derive with sha2 inline so the test stays self-describing.
         use sha2::{Digest as _, Sha256};
-        let canonical = r#"{"argv":[],"cwd":"/tmp","executable":"/usr/bin/true"}"#;
+        let canonical = r#"{"argv":[],"cwd":"/tmp","executable":"/usr/bin/true","reason":"test"}"#;
         let expected = hex::encode(Sha256::digest(canonical.as_bytes()));
         assert_eq!(d, expected);
     }

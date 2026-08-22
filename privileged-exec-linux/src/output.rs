@@ -30,7 +30,7 @@ impl Default for OutputLimits {
 #[derive(Debug, Clone, Default)]
 pub struct BoundedOutput {
     /// Collected bytes (lossy UTF-8).
-    pub text: String,
+    pub text: Vec<u8>,
     /// True if output was truncated at the ceiling.
     pub truncated: bool,
     /// Total bytes received before truncation.
@@ -41,11 +41,11 @@ impl BoundedOutput {
     /// Produce the final text: raw collected text, with the redaction marker
     /// appended when truncation occurred.
     pub fn into_display(self) -> String {
+        let mut display = String::from_utf8_lossy(&self.text).into_owned();
         if self.truncated {
-            format!("{}{}", self.text, REDACTED_MARKER)
-        } else {
-            self.text
+            display.push_str(REDACTED_MARKER);
         }
+        display
     }
 }
 
@@ -69,7 +69,7 @@ pub fn collect_output(buf: &[u8], out: &mut BoundedOutput, limits: OutputLimits)
     } else {
         buf
     };
-    out.text.push_str(&String::from_utf8_lossy(chunk));
+    out.text.extend_from_slice(chunk);
     out.truncated
 }
 
@@ -84,7 +84,7 @@ mod tests {
         let at_limit = collect_output(b"hello", &mut out, limits);
         assert!(!at_limit);
         assert!(!out.truncated);
-        assert_eq!(out.text, "hello");
+        assert_eq!(out.text, b"hello");
         assert_eq!(out.total_bytes, 5);
     }
 
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn into_display_appends_marker_when_truncated() {
         let out = BoundedOutput {
-            text: "partial".to_string(),
+            text: b"partial".to_vec(),
             truncated: true,
             total_bytes: 100,
         };
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn into_display_no_marker_when_not_truncated() {
         let out = BoundedOutput {
-            text: "complete".to_string(),
+            text: b"complete".to_vec(),
             truncated: false,
             total_bytes: 8,
         };
