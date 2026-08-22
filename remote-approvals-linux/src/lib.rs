@@ -285,12 +285,54 @@ pub enum RelayOperation {
     Health,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HpkeDirection {
+    HostToDevice,
+    DeviceToHost,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HpkeContext {
+    pub protocol_version: String,
+    pub request_id: Uuid,
+    pub recipient_key_id: String,
+    pub active_device_epoch: u64,
+    pub direction: HpkeDirection,
+}
+
+impl HpkeContext {
+    pub fn new(
+        request_id: Uuid,
+        recipient_key_id: String,
+        active_device_epoch: u64,
+        direction: HpkeDirection,
+    ) -> Self {
+        Self {
+            protocol_version: PROTOCOL_VERSION.to_string(),
+            request_id,
+            recipient_key_id,
+            active_device_epoch,
+            direction,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        validate_version(&self.protocol_version)?;
+        validate_identifier(&self.recipient_key_id, 1, 128, false)?;
+        validate_epoch(self.active_device_epoch)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResponseEnvelope {
     pub protocol_version: String,
     pub request_id: Uuid,
     pub recipient_key_id: String,
+    pub active_device_epoch: u64,
+    pub direction: HpkeDirection,
     pub enc: String,
     pub ciphertext: String,
 }
@@ -443,7 +485,7 @@ impl ApprovalRequest {
 
     pub fn sign(&mut self, key: &SigningKey) -> Result<()> {
         self.host_signature.clear();
-        self.host_signature = sign_digest(key, &self.request_digest()?);
+        self.host_signature = sign_digest(key, &self.request_digest()?)?;
         Ok(())
     }
 
@@ -550,7 +592,7 @@ impl ApprovalResponse {
 
     pub fn sign(&mut self, key: &SigningKey) -> Result<()> {
         self.device_signature.clear();
-        self.device_signature = sign_digest(key, &self.response_digest()?);
+        self.device_signature = sign_digest(key, &self.response_digest()?)?;
         Ok(())
     }
 
@@ -637,6 +679,7 @@ impl ResponseEnvelope {
     pub fn validate(&self) -> Result<()> {
         validate_version(&self.protocol_version)?;
         validate_identifier(&self.recipient_key_id, 1, 128, false)?;
+        validate_epoch(self.active_device_epoch)?;
         // RFC 9180 P-256 enc is a 65-byte uncompressed SEC1 point = 87 base64url chars.
         let enc = decode_b64(&self.enc, ProtocolError::InvalidSchema)?;
         if enc.len() != 65 {
@@ -644,6 +687,16 @@ impl ResponseEnvelope {
         }
         validate_b64(&self.ciphertext, 1, 87_382)?;
         Ok(())
+    }
+
+    pub fn hpke_context(&self) -> HpkeContext {
+        HpkeContext {
+            protocol_version: self.protocol_version.clone(),
+            request_id: self.request_id,
+            recipient_key_id: self.recipient_key_id.clone(),
+            active_device_epoch: self.active_device_epoch,
+            direction: self.direction,
+        }
     }
 }
 
@@ -736,11 +789,11 @@ pub fn digest_omitting<T: Serialize>(value: &T, omitted_field: &str) -> Result<[
     Ok(Sha256::digest(canonical_json(&json)?).into())
 }
 
-pub fn sign_digest(key: &SigningKey, digest: &[u8; 32]) -> String {
+pub fn sign_digest(key: &SigningKey, digest: &[u8; 32]) -> Result<String> {
     let signature: Signature = key
         .sign_prehash(digest)
-        .expect("SHA-256 has a valid P-256 prehash length");
-    URL_SAFE_NO_PAD.encode(signature.to_bytes())
+        .map_err(|_| ProtocolError::InvalidSignature)?;
+    Ok(URL_SAFE_NO_PAD.encode(signature.to_bytes()))
 }
 
 pub fn verify_digest(key: &VerifyingKey, digest: &[u8; 32], signature: &str) -> Result<()> {
@@ -766,53 +819,34 @@ pub fn verifying_key_to_spki_der(key: &VerifyingKey) -> Result<Vec<u8>> {
         .map(|der| der.as_bytes().to_vec())
         .map_err(|_| ProtocolError::InvalidSchema)
 }
-pub fn derive_hpke_aad(
-    protocol_version: &str,
-    request_id: &Uuid,
-    recipient_key_id: &str,
-    aad: &[u8],
-) -> Vec<u8> {
-    let mut bound = Vec::with_capacity(
-        protocol_version.len() + 1 + 36 + 1 + recipient_key_id.len() + 1 + aad.len(),
-    );
-    bound.extend_from_slice(protocol_version.as_bytes());
-    bound.push(b':');
-    bound.extend_from_slice(request_id.to_string().as_bytes());
-    bound.push(b':');
-    bound.extend_from_slice(recipient_key_id.as_bytes());
-    if !aad.is_empty() {
-        bound.push(b':');
-        bound.extend_from_slice(aad);
-    }
-    bound
-}
 
 /// Encrypts plaintext with exactly RFC 9180 base-mode P-256/HKDF-SHA256/AES-256-GCM.
 pub fn hpke_seal(
-    recipient_key_id: String,
-    request_id: Uuid,
+    context: &HpkeContext,
     recipient_public_key: &[u8],
     plaintext: &[u8],
-    aad: &[u8],
 ) -> Result<ResponseEnvelope> {
+    context.validate()?;
     let public_key = <DhP256HkdfSha256 as hpke::Kem>::PublicKey::from_bytes(recipient_public_key)
         .map_err(|_| ProtocolError::InvalidSchema)?;
     let mut rng = UnwrapErr(OsRng);
-    let (enc, mut context) = setup_sender::<AesGcm256, HkdfSha256, DhP256HkdfSha256, _>(
+    let (enc, mut hpke_ctx) = setup_sender::<AesGcm256, HkdfSha256, DhP256HkdfSha256, _>(
         &OpModeS::Base,
         &public_key,
         HPKE_INFO,
         &mut rng,
     )
     .map_err(|_| ProtocolError::InvalidSchema)?;
-    let bound_aad = derive_hpke_aad(PROTOCOL_VERSION, &request_id, &recipient_key_id, aad);
-    let ciphertext = context
+    let bound_aad = canonical_json(context)?;
+    let ciphertext = hpke_ctx
         .seal(plaintext, &bound_aad)
         .map_err(|_| ProtocolError::InvalidSchema)?;
     let envelope = ResponseEnvelope {
-        protocol_version: PROTOCOL_VERSION.to_string(),
-        request_id,
-        recipient_key_id,
+        protocol_version: context.protocol_version.clone(),
+        request_id: context.request_id,
+        recipient_key_id: context.recipient_key_id.clone(),
+        active_device_epoch: context.active_device_epoch,
+        direction: context.direction,
         enc: URL_SAFE_NO_PAD.encode(enc.to_bytes()),
         ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
     };
@@ -823,9 +857,13 @@ pub fn hpke_seal(
 pub fn hpke_open(
     envelope: &ResponseEnvelope,
     recipient_private_key: &[u8],
-    aad: &[u8],
+    expected_context: &HpkeContext,
 ) -> Result<Vec<u8>> {
+    expected_context.validate()?;
     envelope.validate()?;
+    if envelope.hpke_context() != *expected_context {
+        return Err(ProtocolError::InvalidSignature);
+    }
     let private_key =
         <DhP256HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(recipient_private_key)
             .map_err(|_| ProtocolError::InvalidSchema)?;
@@ -835,20 +873,15 @@ pub fn hpke_open(
     )?)
     .map_err(|_| ProtocolError::InvalidSchema)?;
     let ciphertext = decode_b64(&envelope.ciphertext, ProtocolError::InvalidSchema)?;
-    let mut context = setup_receiver::<AesGcm256, HkdfSha256, DhP256HkdfSha256>(
+    let mut hpke_ctx = setup_receiver::<AesGcm256, HkdfSha256, DhP256HkdfSha256>(
         &OpModeR::Base,
         &private_key,
         &enc,
         HPKE_INFO,
     )
     .map_err(|_| ProtocolError::InvalidSignature)?;
-    let bound_aad = derive_hpke_aad(
-        &envelope.protocol_version,
-        &envelope.request_id,
-        &envelope.recipient_key_id,
-        aad,
-    );
-    context
+    let bound_aad = canonical_json(expected_context)?;
+    hpke_ctx
         .open(&ciphertext, &bound_aad)
         .map_err(|_| ProtocolError::InvalidSignature)
 }
@@ -1206,54 +1239,59 @@ mod tests {
     }
 
     #[test]
-    fn hpke_round_trip_wrong_key_and_aad_fail() {
+    fn hpke_round_trip_and_context_tampering_fail() {
         let mut rng = UnwrapErr(OsRng);
         let (private, public) = DhP256HkdfSha256::gen_keypair(&mut rng);
-        let req_id = Uuid::new_v4();
-        let envelope = hpke_seal(
+        let context = HpkeContext::new(
+            Uuid::new_v4(),
             "recipient-01".into(),
-            req_id,
-            &public.to_bytes(),
-            b"secret payload",
-            b"aad",
-        )
-        .unwrap();
+            7,
+            HpkeDirection::DeviceToHost,
+        );
+        let envelope = hpke_seal(&context, &public.to_bytes(), b"secret payload").unwrap();
         assert_eq!(envelope.enc.len(), 87);
         assert_eq!(
-            hpke_open(&envelope, &private.to_bytes(), b"aad").unwrap(),
+            hpke_open(&envelope, &private.to_bytes(), &context).unwrap(),
             b"secret payload"
-        );
-        assert_eq!(
-            hpke_open(&envelope, &private.to_bytes(), b"wrong"),
-            Err(ProtocolError::InvalidSignature)
         );
         let (wrong_private, _) = DhP256HkdfSha256::gen_keypair(&mut rng);
         assert_eq!(
-            hpke_open(&envelope, &wrong_private.to_bytes(), b"aad"),
+            hpke_open(&envelope, &wrong_private.to_bytes(), &context),
             Err(ProtocolError::InvalidSignature)
         );
 
-        // Tamper protocol_version
         let mut bad_version = envelope.clone();
         bad_version.protocol_version = "zodex.remote-approval.v99".into();
         assert_eq!(
-            hpke_open(&bad_version, &private.to_bytes(), b"aad"),
+            hpke_open(&bad_version, &private.to_bytes(), &context),
             Err(ProtocolError::UnsupportedProtocol)
         );
 
-        // Tamper request_id
         let mut bad_req_id = envelope.clone();
         bad_req_id.request_id = Uuid::new_v4();
         assert_eq!(
-            hpke_open(&bad_req_id, &private.to_bytes(), b"aad"),
+            hpke_open(&bad_req_id, &private.to_bytes(), &context),
             Err(ProtocolError::InvalidSignature)
         );
 
-        // Tamper recipient_key_id
         let mut bad_key_id = envelope.clone();
         bad_key_id.recipient_key_id = "recipient-wrong".into();
         assert_eq!(
-            hpke_open(&bad_key_id, &private.to_bytes(), b"aad"),
+            hpke_open(&bad_key_id, &private.to_bytes(), &context),
+            Err(ProtocolError::InvalidSignature)
+        );
+
+        let mut wrong_epoch = context.clone();
+        wrong_epoch.active_device_epoch += 1;
+        assert_eq!(
+            hpke_open(&envelope, &private.to_bytes(), &wrong_epoch),
+            Err(ProtocolError::InvalidSignature)
+        );
+
+        let mut wrong_direction = context.clone();
+        wrong_direction.direction = HpkeDirection::HostToDevice;
+        assert_eq!(
+            hpke_open(&envelope, &private.to_bytes(), &wrong_direction),
             Err(ProtocolError::InvalidSignature)
         );
     }
@@ -1350,7 +1388,7 @@ mod tests {
     fn signing_canonicalization_digest_and_tampering_protection() {
         let mut req = request();
         let original_digest = req.request_digest().unwrap();
-        let sig = sign_digest(&host_key(), &original_digest);
+        let sig = sign_digest(&host_key(), &original_digest).unwrap();
         assert!(verify_digest(host_key().verifying_key(), &original_digest, &sig).is_ok());
 
         let mut tampered_sig = sig;
@@ -1488,6 +1526,8 @@ mod tests {
             protocol_version: PROTOCOL_VERSION.into(),
             request_id: Uuid::new_v4(),
             recipient_key_id: "key".into(),
+            active_device_epoch: 1,
+            direction: HpkeDirection::DeviceToHost,
             enc: "A".repeat(86),
             ciphertext: "YQ".into(),
         };

@@ -2,13 +2,49 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://zodex.local/schemas/remote-approval/response-envelope-v1.json",
   "title": "Encrypted Zodex remote approval response v1",
-  "type": "object", "additionalProperties": false,
-  "required": ["protocol_version", "request_id", "recipient_key_id", "enc", "ciphertext"],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "request_id",
+    "recipient_key_id",
+    "active_device_epoch",
+    "direction",
+    "enc",
+    "ciphertext"
+  ],
   "properties": {
-    "protocol_version": {"const": "zodex.remote-approval.v1"},
-    "request_id": {"type": "string", "format": "uuid"},
-    "recipient_key_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
-    "enc": {"type": "string", "pattern": "^[A-Za-z0-9_-]{87}$", "description": "RFC 9180 P-256 encapsulated key: 65-byte uncompressed SEC1 point, base64url without padding"},
-    "ciphertext": {"type": "string", "minLength": 1, "maxLength": 87382, "pattern": "^[A-Za-z0-9_-]+$"}
+    "protocol_version": {
+      "const": "zodex.remote-approval.v1"
+    },
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "recipient_key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "active_device_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "direction": {
+      "enum": [
+        "host_to_device",
+        "device_to_host"
+      ]
+    },
+    "enc": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{87}$",
+      "description": "RFC 9180 P-256 encapsulated key: 65-byte uncompressed SEC1 point, base64url without padding"
+    },
+    "ciphertext": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 87382,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    }
   }
 }

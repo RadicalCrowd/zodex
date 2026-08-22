@@ -16,9 +16,10 @@ request or response.
   prehash signing/verification so the protocol's SHA-256 digest is the ECDSA
   prehash rather than implementing ECDSA itself.
 - [`hpke`](https://crates.io/crates/hpke) implements RFC 9180 base mode using
-  `DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM`.  This crate uses its
-  standard encapsulation framing and does not construct AES, ECDH, HKDF, or
-  nonce framing itself.
+  `DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM`.  This crate binds
+  a typed, protocol-owned `HpkeContext` (`protocol_version`, `request_id`,
+  `recipient_key_id`, `active_device_epoch`, and `direction`) serialized via
+  JCS as AAD. Decryption enforces exact context/envelope equality before opening.
 
 ## Residual assumptions
 

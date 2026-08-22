@@ -40,7 +40,12 @@ signature before considering the response valid.
 Requests and responses are encrypted end-to-end using RFC 9180
 `DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM`.  Implementations MUST
 use an audited HPKE library and the suite's standard framing; they MUST NOT
-invent AES/ECDH framing.  The blind relay receives only `RelayFrame` objects
+invent AES/ECDH framing. HPKE context is typed and protocol-owned, binding
+`protocol_version`, `request_id`, `recipient_key_id`, `active_device_epoch`, and
+explicit direction (`host_to_device` or `device_to_host`) serialized via JCS
+(RFC 8785) as AAD. `ResponseEnvelope` includes these binding fields, and decryption
+verifies exact context and envelope equality before AEAD opening. The blind relay
+receives only `RelayFrame` objects
 and cannot decrypt their `ciphertext`.  The schemas describe unencrypted inner
 messages and relay wrappers separately for testability.
 
