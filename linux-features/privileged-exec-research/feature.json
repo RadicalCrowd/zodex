@@ -1,0 +1,10 @@
+{
+  "id": "privileged-exec-research",
+  "title": "Privileged Exec Research (Experimental)",
+  "description": "Disabled-by-default research feature for a separately bundled, structured privileged-exec MCP runner.",
+  "defaultEnabled": false,
+  "internal": true,
+  "entrypoints": {
+    "stageHook": "./stage.sh"
+  }
+}

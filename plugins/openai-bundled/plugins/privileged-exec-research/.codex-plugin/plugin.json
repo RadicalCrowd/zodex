@@ -1,0 +1,32 @@
+{
+  "name": "privileged-exec-research",
+  "version": "0.1.0-linux-research1",
+  "description": "Research-only structured privileged execution for processes launched by Zodex.",
+  "author": {
+    "name": "avifenesh"
+  },
+  "homepage": "https://openai.com/",
+  "license": "MIT",
+  "keywords": [
+    "linux",
+    "privileged-exec",
+    "research",
+    "security"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Privileged Exec Research",
+    "shortDescription": "Experimental structured privileged execution",
+    "longDescription": "This opt-in research plugin is disabled by default and is not a supported terminal or password-entry workflow. It is reserved for a separately reviewed native runner that owns only the processes it launches.",
+    "developerName": "avifenesh",
+    "category": "Productivity",
+    "websiteURL": "https://github.com/ilysenko/codex-desktop-linux",
+    "privacyPolicyURL": "https://openai.com/policies/row-privacy-policy/",
+    "termsOfServiceURL": "https://openai.com/policies/row-terms-of-use/",
+    "defaultPrompt": [
+      "Check whether the privileged execution research runner is installed"
+    ],
+    "brandColor": "#7C2D12",
+    "screenshots": []
+  }
+}

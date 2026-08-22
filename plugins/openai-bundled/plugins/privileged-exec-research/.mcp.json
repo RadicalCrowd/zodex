@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "privileged-exec-research": {
+      "command": "./bin/codex-privileged-exec-linux",
+      "args": ["mcp"],
+      "cwd": "."
+    }
+  }
+}
