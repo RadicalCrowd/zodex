@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "computer-use-linux",
+  "remote-approvals-linux",
   "read-aloud-linux",
   "updater",
   "record-replay-linux",
