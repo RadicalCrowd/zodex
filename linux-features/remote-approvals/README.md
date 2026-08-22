@@ -17,10 +17,9 @@ unknown request methods fail closed.
 For Task **ASR-LIVE**, this feature provides a disposable compatibility harness
 (`asr-live-harness.js`) and documented runbook ([docs/asr-live-runbook.md](../../docs/asr-live-runbook.md)).
 
-The harness validates that a second stock app-server proxy client attached to
-Desktop's shared socket (`shared-app-server-socket`) observes and resolves
-structured approvals while native ChatGPT Remote (`remote-mobile-control`) remains
-connected.
+The harness uses a synthetic `native-remote` client alongside a second
+`proxy-client-2` to model the live compatibility scenarios that Task ASR-LIVE
+needs to prove. It does not enable, launch, or exercise the real live gate.
 
 ### Invariants & Protection
 
@@ -35,4 +34,11 @@ Run tests with:
 ```bash
 node --test linux-features/remote-approvals/test.js
 node linux-features/remote-approvals/asr-live-harness.js
+```
+
+Use the runbook for task context, safety rules, and the exact unexecuted live
+command:
+
+```bash
+cat docs/asr-live-runbook.md
 ```
