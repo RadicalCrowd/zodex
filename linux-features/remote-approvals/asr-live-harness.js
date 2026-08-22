@@ -426,10 +426,12 @@ if (require.main === module) {
 
 module.exports = {
   AsrLiveCompatibilityHarness,
+  AsrLiveHarness: AsrLiveCompatibilityHarness,
   assertNonLiveGateProtection,
   assertZeroNativeAuthAccess,
   createIsolatedHarnessEnv,
   isLiveGateRequested,
   runDryRunSuite,
   sanitizeTranscript,
+  sanitizeMetadata: sanitizeTranscript,
 };
