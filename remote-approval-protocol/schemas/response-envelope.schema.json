@@ -8,7 +8,7 @@
     "protocol_version": {"const": "zodex.remote-approval.v1"},
     "request_id": {"type": "string", "format": "uuid"},
     "recipient_key_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
-    "enc": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$", "description": "RFC 9180 P-256 encapsulated key"},
+    "enc": {"type": "string", "pattern": "^[A-Za-z0-9_-]{87}$", "description": "RFC 9180 P-256 encapsulated key: 65-byte uncompressed SEC1 point, base64url without padding"},
     "ciphertext": {"type": "string", "minLength": 1, "maxLength": 87382, "pattern": "^[A-Za-z0-9_-]+$"}
   }
 }
