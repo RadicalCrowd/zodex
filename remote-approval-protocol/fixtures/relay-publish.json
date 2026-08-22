@@ -1,0 +1,9 @@
+{
+  "protocol_version": "zodex.remote-approval.v1",
+  "operation": "publish",
+  "request_id": "1f40fb52-3957-4f08-9016-84b2c526376b",
+  "sender": "desktop-01",
+  "recipient": "pixel-01",
+  "created_at": "2026-08-22T10:00:00Z",
+  "ciphertext": "b3BhcXVlLWNpcGhlcnRleHQ"
+}

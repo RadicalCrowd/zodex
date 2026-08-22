@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zodex.local/schemas/remote-approval/pairing-record-v1.json",
+  "title": "Local paired-device record v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol_version", "device_id", "state", "active_device_epoch", "signing_key_id", "encryption_key_id", "webauthn_credential_id", "rp_id", "origin", "paired_at"],
+  "properties": {
+    "protocol_version": {"const": "zodex.remote-approval.v1"},
+    "device_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "state": {"enum": ["pairing", "paired_inactive", "active", "revoked", "rotated"]},
+    "active_device_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "signing_key_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "encryption_key_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "webauthn_credential_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,2048}$"},
+    "rp_id": {"type": "string", "pattern": "^[A-Za-z0-9.-]{1,253}$"},
+    "origin": {"type": "string", "format": "uri", "pattern": "^https://"},
+    "paired_at": {"type": "string", "format": "date-time"},
+    "revoked_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "protocol_version": "zodex.remote-approval.v1",
+  "request_id": "1f40fb52-3957-4f08-9016-84b2c526376b",
+  "action_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "active_device_epoch": 7,
+  "device": {"device_id": "pixel-01", "signing_key_id": "pixel-sign-2026-08", "credential_id": "Y3JlZGVudGlhbC0x"},
+  "decision": {"type": "approve"},
+  "webauthn": {"client_data_json": "Y2xpZW50LWRhdGE", "authenticator_data": "YXV0aC1kYXRh", "signature": "d2ViYXV0aG4tc2ln"},
+  "device_signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zodex.local/schemas/remote-approval/response-v1.json",
+  "title": "Decrypted Zodex remote approval response v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol_version", "request_id", "action_digest", "active_device_epoch", "device", "decision", "webauthn", "device_signature"],
+  "properties": {
+    "protocol_version": {"const": "zodex.remote-approval.v1"},
+    "request_id": {"type": "string", "format": "uuid"},
+    "action_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "active_device_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "device": {"type": "object", "additionalProperties": false, "required": ["device_id", "signing_key_id", "credential_id"], "properties": {"device_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"}, "signing_key_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"}, "credential_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,2048}$"}}},
+    "decision": {"$ref": "#/$defs/decision"},
+    "webauthn": {"type": "object", "additionalProperties": false, "required": ["client_data_json", "authenticator_data", "signature"], "properties": {"client_data_json": {"$ref": "#/$defs/b64"}, "authenticator_data": {"$ref": "#/$defs/b64"}, "signature": {"$ref": "#/$defs/b64"}, "user_handle": {"$ref": "#/$defs/b64"}}},
+    "device_signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
+  },
+  "$defs": {
+    "b64": {"type": "string", "minLength": 1, "maxLength": 16384, "pattern": "^[A-Za-z0-9_-]+$"},
+    "choice_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "decision": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"const": "approve"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"const": "reject"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": {"type": {"const": "boolean"}, "value": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "choice_id"], "properties": {"type": {"const": "enum"}, "choice_id": {"$ref": "#/$defs/choice_id"}}}
+      ]
+    }
+  }
+}

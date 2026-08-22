@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zodex.local/schemas/remote-approval/relay-frame-v1.json",
+  "title": "Blind relay frame v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol_version", "operation", "request_id", "sender", "recipient", "created_at"],
+  "properties": {
+    "protocol_version": {"const": "zodex.remote-approval.v1"},
+    "operation": {"enum": ["connect", "publish", "subscribe", "ack", "pushWakeup", "health"]},
+    "request_id": {"type": "string", "format": "uuid"},
+    "sender": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "recipient": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "ciphertext": {"type": "string", "minLength": 1, "maxLength": 87382, "pattern": "^[A-Za-z0-9_-]+$"},
+    "ack_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{22,86}$"}
+  },
+  "allOf": [
+    {"if": {"properties": {"operation": {"const": "publish"}}}, "then": {"required": ["ciphertext"]}},
+    {"if": {"properties": {"operation": {"const": "ack"}}}, "then": {"required": ["ack_id"]}}
+  ]
+}

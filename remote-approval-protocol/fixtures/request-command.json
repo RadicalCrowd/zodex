@@ -1,0 +1,12 @@
+{
+  "protocol_version": "zodex.remote-approval.v1",
+  "request_id": "1f40fb52-3957-4f08-9016-84b2c526376b",
+  "nonce": "MDEyMzQ1Njc4OWFiY2RlZg",
+  "issued_at": "2026-08-22T10:00:00Z",
+  "expires_at": "2026-08-22T10:05:00Z",
+  "active_device_epoch": 7,
+  "host": {"host_id": "desktop-01", "signing_key_id": "host-sign-2026-08", "encryption_key_id": "host-hpke-2026-08"},
+  "action": {"kind": "command", "title": "Run project tests", "summary": "Runs the selected test command in the Zodex project.", "executable": "/usr/bin/npm", "argv": ["test", "--", "--runInBand"], "cwd": "/home/example/Projects/zodex"},
+  "action_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "host_signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+}

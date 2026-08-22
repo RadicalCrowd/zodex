@@ -1,0 +1,12 @@
+{
+  "protocol_version": "zodex.remote-approval.v1",
+  "device_id": "pixel-01",
+  "state": "active",
+  "active_device_epoch": 7,
+  "signing_key_id": "pixel-sign-2026-08",
+  "encryption_key_id": "pixel-hpke-2026-08",
+  "webauthn_credential_id": "Y3JlZGVudGlhbC0x",
+  "rp_id": "approvals.example.test",
+  "origin": "https://approvals.example.test",
+  "paired_at": "2026-08-22T09:00:00Z"
+}
