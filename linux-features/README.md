@@ -26,6 +26,12 @@ Native packages preserve the enabled feature id list and settings in the
 packaged update-builder bundle, so `codex-update-manager` rebuilds keep the
 same opt-in features across auto-updates.
 
+Explicitly retired feature IDs in `compatibility.json` are ignored so an old
+local selection does not break a later build. The retired `interactive-console`
+prototype is intentionally not staged: it did not provide a PTY, agent-command
+ownership, or a secure password-input boundary. Arbitrary unknown feature IDs
+remain errors.
+
 Feature-specific local settings can live in the same gitignored file under
 `settings.<feature-id>`. Keep tracked `feature.json` files as shipped defaults;
 do not edit them for personal preferences. Feature patch descriptors receive
