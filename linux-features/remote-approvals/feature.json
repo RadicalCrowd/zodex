@@ -1,0 +1,6 @@
+{
+  "id": "remote-approvals",
+  "title": "Remote Approvals (Synthetic Fixture)",
+  "description": "Disabled-by-default offline fixture for normalizing and arbitrating app-server approval requests.",
+  "defaultEnabled": false
+}
