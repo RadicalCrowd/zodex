@@ -6,7 +6,7 @@
   "expires_at": "2026-08-22T10:05:00Z",
   "active_device_epoch": 7,
   "host": {"host_id": "desktop-01", "signing_key_id": "host-sign-2026-08", "encryption_key_id": "host-hpke-2026-08"},
-  "action": {"kind": "command", "title": "Run project tests", "summary": "Runs the selected test command in the Zodex project.", "executable": "/usr/bin/npm", "argv": ["test", "--", "--runInBand"], "cwd": "/home/example/Projects/zodex"},
-  "action_digest": "73c00ddb9e378a7e6a52ad4c5311fd9d4f0cbbab9b1b0410126d2a473c2bbd01",
+  "action": {"kind": "file_change", "title": "Modify main.rs", "summary": "Updates main entrypoint", "operation": "modify", "paths": ["/home/user/project/src/main.rs"]},
+  "action_digest": "38d278a2005f4cfe8e676952c8dfdd08c0c67442c8c319867f9a402c4a37a3bb",
   "host_signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 }

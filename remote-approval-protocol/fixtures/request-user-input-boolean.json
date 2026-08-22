@@ -6,7 +6,7 @@
   "expires_at": "2026-08-22T10:05:00Z",
   "active_device_epoch": 7,
   "host": {"host_id": "desktop-01", "signing_key_id": "host-sign-2026-08", "encryption_key_id": "host-hpke-2026-08"},
-  "action": {"kind": "command", "title": "Run project tests", "summary": "Runs the selected test command in the Zodex project.", "executable": "/usr/bin/npm", "argv": ["test", "--", "--runInBand"], "cwd": "/home/example/Projects/zodex"},
-  "action_digest": "73c00ddb9e378a7e6a52ad4c5311fd9d4f0cbbab9b1b0410126d2a473c2bbd01",
+  "action": {"kind": "user_input", "title": "Deploy to production?", "summary": "Confirm deployment to production", "input": {"type": "boolean"}},
+  "action_digest": "c2d068a2e23b27642271f29a402e512be2af566565efa75a892035aef86661ea",
   "host_signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 }

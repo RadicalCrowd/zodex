@@ -30,6 +30,18 @@ binding before resolving an upstream action.  System key storage, transport
 authentication, relay limits, and atomic persistence of `RequestLifecycle`
 are broker responsibilities.
 
+## Broker Responsibilities
+
+Higher-level broker implementations must fulfill seven non-delegable security responsibilities:
+
+1. **WebAuthn Verification**: Validate WebAuthn `clientDataJSON.challenge` (matching `base64url(SHA-256(response_digest))`), RP ID/origin, User Verification (UV) flag, and credential-to-device binding before accepting an upstream response.
+2. **Keyring Storage**: Secure private signing and decryption keys in the OS keyring on desktop or non-extractable WebCrypto storage in PWAs.
+3. **TLS/WSS Transport**: Manage outbound TLS/WSS network connections framing without listening on public inbound ports.
+4. **Relay Frame & Rate Limits**: Enforce 64 KiB maximum ciphertext size, 2 KiB metadata size, max 32 pending requests per active device (1 per action/thread), 60 frames/min rate limit per connection, and 5 minute max ciphertext retention.
+5. **Atomic Persistence**: Track single-use lifecycle state transitions (`RequestLifecycle`) and persist state atomically to prevent replay or race conditions.
+6. **Fail-Closed Upstream Resolution & Ciphertext Deletion**: Immediately resolve upstream requests as failed and delete queued relay ciphertext on error, expiry, cancellation, or revocation.
+7. **Metadata-Only Audit Logging**: Log only safe metadata (event names, request/device IDs, epochs, timestamps, outcome/error codes, request kinds, profile IDs, truncated key IDs) and never raw action text, file paths, command arguments, ciphertexts, URLs, WebAuthn blobs, passwords, or full hashes.
+
 The selected `hpke` release publishes RFC 9180 known-answer tests, but its
 upstream documentation notes that it has not received a formal independent
 audit.  This is a tracked library-assurance assumption: upgrades require a

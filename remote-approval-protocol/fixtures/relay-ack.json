@@ -1,0 +1,9 @@
+{
+  "protocol_version": "zodex.remote-approval.v1",
+  "operation": "ack",
+  "request_id": "1f40fb52-3957-4f08-9016-84b2c526376b",
+  "sender": "pixel-01",
+  "recipient": "desktop-01",
+  "created_at": "2026-08-22T10:00:00Z",
+  "ack_id": "MDEyMzQ1Njc4OWFiY2RlZg"
+}

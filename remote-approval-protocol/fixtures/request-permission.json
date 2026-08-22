@@ -6,7 +6,7 @@
   "expires_at": "2026-08-22T10:05:00Z",
   "active_device_epoch": 7,
   "host": {"host_id": "desktop-01", "signing_key_id": "host-sign-2026-08", "encryption_key_id": "host-hpke-2026-08"},
-  "action": {"kind": "command", "title": "Run project tests", "summary": "Runs the selected test command in the Zodex project.", "executable": "/usr/bin/npm", "argv": ["test", "--", "--runInBand"], "cwd": "/home/example/Projects/zodex"},
-  "action_digest": "73c00ddb9e378a7e6a52ad4c5311fd9d4f0cbbab9b1b0410126d2a473c2bbd01",
+  "action": {"kind": "permission", "title": "Grant filesystem access", "summary": "Grant write access to project folder", "permission": "filesystem.write", "scope": "/home/user/project"},
+  "action_digest": "09a5a89b65f5a1e2aa7d78cb1c2d19c04c48a3cd1cb21392690caf252073d702",
   "host_signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 }

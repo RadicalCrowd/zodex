@@ -1,7 +1,19 @@
 //! Fail-closed native protocol primitives for Remote Approvals v1.
 //!
-//! This module intentionally does not verify a WebAuthn assertion.  A caller
-//! must do that before it calls [`RequestLifecycle::accept_response`].
+//! This crate is the core cryptographic contract engine and typed validator.
+//! It intentionally contains no networking, keyring, WebAuthn assertion verification,
+//! or process execution logic. Higher-level broker implementations must fulfill
+//! the following seven core responsibilities:
+//!
+//! 1. **WebAuthn Verification**: Validate WebAuthn `clientDataJSON.challenge` (matching `base64url(SHA-256(response_digest))`),
+//!    RP ID/origin, User Verification (UV) flag, and credential-to-device binding before accepting an upstream response.
+//! 2. **Keyring Storage**: Secure private signing and decryption keys in the OS keyring on desktop or non-extractable WebCrypto storage in PWAs.
+//! 3. **TLS/WSS Transport**: Manage outbound TLS/WSS network connections framing without listening on public inbound ports.
+//! 4. **Relay Frame & Rate Limits**: Enforce 64 KiB maximum ciphertext size, 2 KiB metadata size, max 32 pending requests per active device
+//!    (1 per action/thread), 60 frames/min rate limit per connection, and 5 minute max ciphertext retention.
+//! 5. **Atomic Persistence**: Track single-use lifecycle state transitions ([`RequestLifecycle`]) and persist state atomically to prevent replay or race conditions.
+//! 6. **Fail-Closed Upstream Resolution & Ciphertext Deletion**: Immediately resolve upstream requests as failed and delete queued relay ciphertext on error, expiry, cancellation, or revocation.
+//! 7. **Metadata-Only Audit Logging**: Log only safe metadata (event names, request/device IDs, epochs, timestamps, outcome/error codes, request kinds, profile IDs, truncated key IDs) and never raw action text, file paths, command arguments, ciphertexts, URLs, WebAuthn blobs, passwords, or full hashes.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hpke::{
@@ -22,6 +34,8 @@ use std::fmt;
 use thiserror::Error;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 use uuid::Uuid;
+
+pub use zeroize::Zeroizing;
 
 /// The only accepted protocol version.
 pub const PROTOCOL_VERSION: &str = "zodex.remote-approval.v1";
@@ -246,7 +260,7 @@ pub struct ApprovalResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct RelayFrame {
     pub protocol_version: String,
     pub operation: RelayOperation,
@@ -589,22 +603,31 @@ impl RelayFrame {
         parse_time(&self.created_at)?;
         match self.operation {
             RelayOperation::Publish => {
+                if self.ack_id.is_some() {
+                    return Err(ProtocolError::InvalidSchema);
+                }
                 let ciphertext = self
                     .ciphertext
                     .as_deref()
                     .ok_or(ProtocolError::InvalidSchema)?;
                 validate_b64(ciphertext, 1, 87_382)?;
             }
-            RelayOperation::Ack => validate_identifier(
-                self.ack_id.as_deref().ok_or(ProtocolError::InvalidSchema)?,
-                22,
-                86,
-                true,
-            )?,
-            _ if self.ciphertext.is_some() || self.ack_id.is_some() => {
-                return Err(ProtocolError::InvalidSchema)
+            RelayOperation::Ack => {
+                if self.ciphertext.is_some() {
+                    return Err(ProtocolError::InvalidSchema);
+                }
+                validate_identifier(
+                    self.ack_id.as_deref().ok_or(ProtocolError::InvalidSchema)?,
+                    22,
+                    86,
+                    true,
+                )?;
             }
-            _ => {}
+            _ => {
+                if self.ciphertext.is_some() || self.ack_id.is_some() {
+                    return Err(ProtocolError::InvalidSchema);
+                }
+            }
         }
         Ok(())
     }
@@ -733,15 +756,35 @@ pub fn signing_key_from_pkcs8_der(der: &[u8]) -> Result<SigningKey> {
 pub fn verifying_key_from_spki_der(der: &[u8]) -> Result<VerifyingKey> {
     VerifyingKey::from_public_key_der(der).map_err(|_| ProtocolError::InvalidSchema)
 }
-pub fn signing_key_to_pkcs8_der(key: &SigningKey) -> Result<Vec<u8>> {
+pub fn signing_key_to_pkcs8_der(key: &SigningKey) -> Result<Zeroizing<Vec<u8>>> {
     key.to_pkcs8_der()
-        .map(|der| der.as_bytes().to_vec())
+        .map(|der| Zeroizing::new(der.as_bytes().to_vec()))
         .map_err(|_| ProtocolError::InvalidSchema)
 }
 pub fn verifying_key_to_spki_der(key: &VerifyingKey) -> Result<Vec<u8>> {
     key.to_public_key_der()
         .map(|der| der.as_bytes().to_vec())
         .map_err(|_| ProtocolError::InvalidSchema)
+}
+pub fn derive_hpke_aad(
+    protocol_version: &str,
+    request_id: &Uuid,
+    recipient_key_id: &str,
+    aad: &[u8],
+) -> Vec<u8> {
+    let mut bound = Vec::with_capacity(
+        protocol_version.len() + 1 + 36 + 1 + recipient_key_id.len() + 1 + aad.len(),
+    );
+    bound.extend_from_slice(protocol_version.as_bytes());
+    bound.push(b':');
+    bound.extend_from_slice(request_id.to_string().as_bytes());
+    bound.push(b':');
+    bound.extend_from_slice(recipient_key_id.as_bytes());
+    if !aad.is_empty() {
+        bound.push(b':');
+        bound.extend_from_slice(aad);
+    }
+    bound
 }
 
 /// Encrypts plaintext with exactly RFC 9180 base-mode P-256/HKDF-SHA256/AES-256-GCM.
@@ -762,8 +805,9 @@ pub fn hpke_seal(
         &mut rng,
     )
     .map_err(|_| ProtocolError::InvalidSchema)?;
+    let bound_aad = derive_hpke_aad(PROTOCOL_VERSION, &request_id, &recipient_key_id, aad);
     let ciphertext = context
-        .seal(plaintext, aad)
+        .seal(plaintext, &bound_aad)
         .map_err(|_| ProtocolError::InvalidSchema)?;
     let envelope = ResponseEnvelope {
         protocol_version: PROTOCOL_VERSION.to_string(),
@@ -798,8 +842,14 @@ pub fn hpke_open(
         HPKE_INFO,
     )
     .map_err(|_| ProtocolError::InvalidSignature)?;
+    let bound_aad = derive_hpke_aad(
+        &envelope.protocol_version,
+        &envelope.request_id,
+        &envelope.recipient_key_id,
+        aad,
+    );
     context
-        .open(&ciphertext, aad)
+        .open(&ciphertext, &bound_aad)
         .map_err(|_| ProtocolError::InvalidSignature)
 }
 
@@ -880,9 +930,12 @@ fn validate_path(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 4096
         || !value.starts_with('/')
-        || value.contains('\n')
-        || value.contains('\r')
-        || value.chars().any(|character| character == '\0')
+        || value.chars().any(|character| character.is_control())
+        || value.contains("//")
+        || (value != "/" && value.ends_with('/'))
+        || value
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
     {
         Err(ProtocolError::InvalidSchema)
     } else {
@@ -1156,9 +1209,10 @@ mod tests {
     fn hpke_round_trip_wrong_key_and_aad_fail() {
         let mut rng = UnwrapErr(OsRng);
         let (private, public) = DhP256HkdfSha256::gen_keypair(&mut rng);
+        let req_id = Uuid::new_v4();
         let envelope = hpke_seal(
             "recipient-01".into(),
-            Uuid::new_v4(),
+            req_id,
             &public.to_bytes(),
             b"secret payload",
             b"aad",
@@ -1178,15 +1232,227 @@ mod tests {
             hpke_open(&envelope, &wrong_private.to_bytes(), b"aad"),
             Err(ProtocolError::InvalidSignature)
         );
+
+        // Tamper protocol_version
+        let mut bad_version = envelope.clone();
+        bad_version.protocol_version = "zodex.remote-approval.v99".into();
+        assert_eq!(
+            hpke_open(&bad_version, &private.to_bytes(), b"aad"),
+            Err(ProtocolError::UnsupportedProtocol)
+        );
+
+        // Tamper request_id
+        let mut bad_req_id = envelope.clone();
+        bad_req_id.request_id = Uuid::new_v4();
+        assert_eq!(
+            hpke_open(&bad_req_id, &private.to_bytes(), b"aad"),
+            Err(ProtocolError::InvalidSignature)
+        );
+
+        // Tamper recipient_key_id
+        let mut bad_key_id = envelope.clone();
+        bad_key_id.recipient_key_id = "recipient-wrong".into();
+        assert_eq!(
+            hpke_open(&bad_key_id, &private.to_bytes(), b"aad"),
+            Err(ProtocolError::InvalidSignature)
+        );
     }
 
+    #[test]
+    fn normalized_path_validation_enforces_strict_formatting() {
+        assert!(validate_path("/usr/bin/npm").is_ok());
+        assert!(validate_path("/").is_ok());
+        assert!(validate_path("/home/user/file.rs").is_ok());
+        assert_eq!(validate_path(""), Err(ProtocolError::InvalidSchema));
+        assert_eq!(validate_path("usr/bin"), Err(ProtocolError::InvalidSchema));
+        assert_eq!(
+            validate_path("/usr//bin"),
+            Err(ProtocolError::InvalidSchema)
+        );
+        assert_eq!(
+            validate_path("/usr/./bin"),
+            Err(ProtocolError::InvalidSchema)
+        );
+        assert_eq!(
+            validate_path("/usr/../bin"),
+            Err(ProtocolError::InvalidSchema)
+        );
+        assert_eq!(
+            validate_path("/usr/bin/"),
+            Err(ProtocolError::InvalidSchema)
+        );
+        assert_eq!(
+            validate_path("/usr/bin\n"),
+            Err(ProtocolError::InvalidSchema)
+        );
+        assert_eq!(
+            validate_path("/usr/bin\0"),
+            Err(ProtocolError::InvalidSchema)
+        );
+    }
+
+    #[test]
+    fn relay_frame_schema_and_operation_constraints() {
+        let mut publish = RelayFrame {
+            protocol_version: PROTOCOL_VERSION.into(),
+            operation: RelayOperation::Publish,
+            request_id: Uuid::new_v4(),
+            sender: "desktop-01".into(),
+            recipient: "pixel-01".into(),
+            created_at: "2026-08-22T10:00:00Z".into(),
+            ciphertext: Some("b3BhcXVlLWNpcGhlcnRleHQ".into()),
+            ack_id: None,
+        };
+        assert!(publish.validate().is_ok());
+        publish.ack_id = Some("MDEyMzQ1Njc4OWFiY2RlZg".into());
+        assert_eq!(publish.validate(), Err(ProtocolError::InvalidSchema));
+
+        let mut ack = RelayFrame {
+            protocol_version: PROTOCOL_VERSION.into(),
+            operation: RelayOperation::Ack,
+            request_id: Uuid::new_v4(),
+            sender: "pixel-01".into(),
+            recipient: "desktop-01".into(),
+            created_at: "2026-08-22T10:00:00Z".into(),
+            ciphertext: None,
+            ack_id: Some("MDEyMzQ1Njc4OWFiY2RlZg".into()),
+        };
+        assert!(ack.validate().is_ok());
+        ack.ciphertext = Some("b3BhcXVlLWNpcGhlcnRleHQ".into());
+        assert_eq!(ack.validate(), Err(ProtocolError::InvalidSchema));
+
+        for op in [
+            RelayOperation::Connect,
+            RelayOperation::Subscribe,
+            RelayOperation::PushWakeup,
+            RelayOperation::Health,
+        ] {
+            let mut other = RelayFrame {
+                protocol_version: PROTOCOL_VERSION.into(),
+                operation: op,
+                request_id: Uuid::new_v4(),
+                sender: "desktop-01".into(),
+                recipient: "pixel-01".into(),
+                created_at: "2026-08-22T10:00:00Z".into(),
+                ciphertext: None,
+                ack_id: None,
+            };
+            assert!(other.validate().is_ok());
+            other.ciphertext = Some("b3BhcXVlLWNpcGhlcnRleHQ".into());
+            assert_eq!(other.validate(), Err(ProtocolError::InvalidSchema));
+            other.ciphertext = None;
+            other.ack_id = Some("MDEyMzQ1Njc4OWFiY2RlZg".into());
+            assert_eq!(other.validate(), Err(ProtocolError::InvalidSchema));
+        }
+    }
+
+    #[test]
+    fn signing_canonicalization_digest_and_tampering_protection() {
+        let mut req = request();
+        let original_digest = req.request_digest().unwrap();
+        let sig = sign_digest(&host_key(), &original_digest);
+        assert!(verify_digest(host_key().verifying_key(), &original_digest, &sig).is_ok());
+
+        let mut tampered_sig = sig;
+        tampered_sig.replace_range(0..1, "B");
+        assert_eq!(
+            verify_digest(host_key().verifying_key(), &original_digest, &tampered_sig),
+            Err(ProtocolError::InvalidSignature)
+        );
+
+        req.nonce = "MDEyMzQ1Njc4OWFiY2RlZ2dn".into();
+        assert_eq!(
+            req.verify_signature(host_key().verifying_key()),
+            Err(ProtocolError::InvalidSignature)
+        );
+    }
+
+    #[test]
+    fn typed_fixture_coverage_for_all_13_fixtures() {
+        let pairing_json =
+            include_str!("../../remote-approval-protocol/fixtures/pairing-record.json");
+        let pairing: PairingRecord = serde_json::from_str(pairing_json).unwrap();
+        pairing.validate().unwrap();
+
+        let req_fixtures = [
+            (
+                "command",
+                include_str!("../../remote-approval-protocol/fixtures/request-command.json"),
+            ),
+            (
+                "file-change",
+                include_str!("../../remote-approval-protocol/fixtures/request-file-change.json"),
+            ),
+            (
+                "permission",
+                include_str!("../../remote-approval-protocol/fixtures/request-permission.json"),
+            ),
+            (
+                "boolean",
+                include_str!(
+                    "../../remote-approval-protocol/fixtures/request-user-input-boolean.json"
+                ),
+            ),
+            (
+                "enum",
+                include_str!(
+                    "../../remote-approval-protocol/fixtures/request-user-input-enum.json"
+                ),
+            ),
+        ];
+        for (name, json) in req_fixtures {
+            let req: ApprovalRequest = serde_json::from_str(json).unwrap();
+            let calculated = action_digest(&req.action).unwrap();
+            println!(
+                "{name}: in_file={}, calculated={calculated}",
+                req.action_digest
+            );
+            req.validate().unwrap();
+            assert_eq!(req.action_digest, action_digest(&req.action).unwrap());
+            assert_eq!(
+                req.verify_signature(host_key().verifying_key()),
+                Err(ProtocolError::InvalidSignature)
+            );
+        }
+
+        let resp_fixtures = [
+            include_str!("../../remote-approval-protocol/fixtures/response-approve.json"),
+            include_str!("../../remote-approval-protocol/fixtures/response-reject.json"),
+            include_str!(
+                "../../remote-approval-protocol/fixtures/response-user-input-boolean.json"
+            ),
+            include_str!("../../remote-approval-protocol/fixtures/response-user-input-enum.json"),
+        ];
+        for json in resp_fixtures {
+            let resp: ApprovalResponse = serde_json::from_str(json).unwrap();
+            resp.validate().unwrap();
+            assert_eq!(
+                resp.verify_signature(device_key().verifying_key()),
+                Err(ProtocolError::InvalidSignature)
+            );
+        }
+
+        let env_json =
+            include_str!("../../remote-approval-protocol/fixtures/response-envelope.json");
+        let env: ResponseEnvelope = serde_json::from_str(env_json).unwrap();
+        env.validate().unwrap();
+
+        let relay_fixtures = [
+            include_str!("../../remote-approval-protocol/fixtures/relay-publish.json"),
+            include_str!("../../remote-approval-protocol/fixtures/relay-ack.json"),
+        ];
+        for json in relay_fixtures {
+            let frame: RelayFrame = serde_json::from_str(json).unwrap();
+            frame.validate().unwrap();
+        }
+    }
     #[test]
     fn placeholders_unknown_fields_and_noncanonical_wire_never_verify() {
         let fixture = include_str!("../../remote-approval-protocol/fixtures/request-command.json");
         let placeholder: ApprovalRequest = serde_json::from_str(fixture).unwrap();
         assert_eq!(
             placeholder.verify_signature(host_key().verifying_key()),
-            Err(ProtocolError::InvalidActionDigest)
+            Err(ProtocolError::InvalidSignature)
         );
         let unknown = br#"{"action_digest":"0000000000000000000000000000000000000000000000000000000000000000","action":{"argv":[],"cwd":"/tmp","executable":"/bin/true","kind":"command","summary":"s","title":"t"},"active_device_epoch":1,"expires_at":"2026-08-22T10:01:00Z","host":{"encryption_key_id":"e","host_id":"h","signing_key_id":"s"},"host_signature":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","issued_at":"2026-08-22T10:00:00Z","nonce":"MDEyMzQ1Njc4OWFiY2RlZg","protocol_version":"zodex.remote-approval.v1","request_id":"1f40fb52-3957-4f08-9016-84b2c526376b","unexpected":true}"#;
         assert!(serde_json::from_slice::<ApprovalRequest>(unknown).is_err());

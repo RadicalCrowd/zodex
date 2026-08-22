@@ -1,0 +1,7 @@
+{
+  "protocol_version": "zodex.remote-approval.v1",
+  "request_id": "1f40fb52-3957-4f08-9016-84b2c526376b",
+  "recipient_key_id": "host-hpke-2026-08",
+  "enc": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "ciphertext": "b3BhcXVlLWNpcGhlcnRleHQ"
+}

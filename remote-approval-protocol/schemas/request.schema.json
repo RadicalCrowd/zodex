@@ -25,10 +25,10 @@
     "action_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "host_signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
   },
-  "$defs": {
-    "safe_text": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000-\\u001F\\u007F]*$"},
-    "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\n\\r]*$"},
-    "action": {
+ "$defs": {
+   "safe_text": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000-\\u001F\\u007F]*$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?:/|(?:/(?!\\./|\\.\\./|\\.$|\\.\\.$)[^/\\u0000-\\u001F\\u007F]+)+)$"},
+   "action": {
       "oneOf": [
         {"type": "object", "additionalProperties": false, "required": ["kind", "title", "summary", "executable", "argv", "cwd"], "properties": {"kind": {"const": "command"}, "title": {"$ref": "#/$defs/safe_text"}, "summary": {"$ref": "#/$defs/safe_text"}, "executable": {"$ref": "#/$defs/path"}, "argv": {"type": "array", "minItems": 0, "maxItems": 128, "items": {"$ref": "#/$defs/safe_text"}}, "cwd": {"$ref": "#/$defs/path"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "title", "summary", "operation", "paths"], "properties": {"kind": {"const": "file_change"}, "title": {"$ref": "#/$defs/safe_text"}, "summary": {"$ref": "#/$defs/safe_text"}, "operation": {"enum": ["create", "modify", "delete", "rename"]}, "paths": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"$ref": "#/$defs/path"}}}},
