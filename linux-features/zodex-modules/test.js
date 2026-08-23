@@ -237,6 +237,27 @@ test("Scenario B: valid config transitions through Warning 1, Warning 2, and Ena
   assert.equal(brokerConnectionStates(parseConfig(disabled))[0].state, "off");
 });
 
+test("Scenario B: audited OmniRoute OpenCode and Kilo providers are accepted", () => {
+  const config = validConfig();
+  const acknowledged = {
+    enabled: true,
+    acknowledgements: [ACKNOWLEDGEMENT_RISK, ACKNOWLEDGEMENT_EFFECTS],
+  };
+  config.oauth.brokers.omniroute.providers = {
+    opencode: acknowledged,
+    kilo: acknowledged,
+  };
+
+  const states = brokerConnectionStates(parseConfig(config));
+  assert.deepEqual(
+    states.map(({ providerId, state, active }) => ({ providerId, state, active })),
+    [
+      { providerId: "opencode", state: "enabled", active: true },
+      { providerId: "kilo", state: "enabled", active: true },
+    ],
+  );
+});
+
 test("Scenario B: status reports valid state and connections when CODEX_LINUX_FEATURES_DIR is valid", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "zodex-valid-env-test-"));
   try {

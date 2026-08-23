@@ -14,7 +14,7 @@ const ACKNOWLEDGEMENTS = Object.freeze([
 const SECRET_KEY_PATTERN = /(?:api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret|credential|private[-_]?key)/iu;
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
 const BROKER_PROVIDERS = Object.freeze({
-  omniroute: new Set(["anthropic", "google"]),
+  omniroute: new Set(["anthropic", "google", "opencode", "kilo"]),
   "opencode-community": new Set(),
 });
 
