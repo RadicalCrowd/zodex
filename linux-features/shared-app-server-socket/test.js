@@ -898,6 +898,132 @@ test("orphan reaper refuses two live listener inodes for the same pathname", asy
   }
 });
 
+test("injected transport composes remote-control authority argv only from an exact staged Desktop marker", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-app-server-remote-control-"));
+  const originalAppDir = process.env.CODEX_LINUX_APP_DIR;
+  const originalCli = process.env.CODEX_CLI_PATH;
+  process.env.CODEX_CLI_PATH = "/fake/codex";
+
+  async function startAuthority(markerContents) {
+    const instanceDir = fs.mkdtempSync(path.join(tempDir, "app-"));
+    const socketPath = path.join(instanceDir, "app-server.sock");
+    const markerPath = path.join(
+      instanceDir,
+      ".codex-linux",
+      "desktop-app-server-remote-control-enabled",
+    );
+    if (markerContents != null) {
+      fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+      fs.writeFileSync(markerPath, markerContents, "utf8");
+    }
+
+    let authorityArgs;
+    let authorityChild;
+    let server;
+    const { Transport } = loadInjectedTransport({
+      spawnImpl(_command, args) {
+        authorityArgs = Array.from(args);
+        authorityChild = fakeChild();
+        const target = args.at(-1).replace("unix://", "");
+        queueMicrotask(async () => {
+          server = await listenUnix(target);
+          authorityChild.kill = () => {
+            authorityChild.killed = true;
+            authorityChild.signalCode = "SIGTERM";
+            server.close(() => authorityChild.emit("close", null, "SIGTERM"));
+            return true;
+          };
+        });
+        return authorityChild;
+      },
+    });
+    process.env.CODEX_LINUX_APP_DIR = instanceDir;
+    const transport = new Transport(socketPath);
+    await transport.ensureAuthority();
+    const closed = once(authorityChild, "close");
+    transport.dispose();
+    await closed;
+    return { authorityArgs, socketPath };
+  }
+
+  try {
+    const sharedOnly = await startAuthority(null);
+    assert.deepEqual(sharedOnly.authorityArgs, [
+      "app-server",
+      "--listen",
+      `unix://${sharedOnly.socketPath}`,
+    ]);
+
+    const composed = await startAuthority("version=1\nowner=desktop\n");
+    assert.deepEqual(composed.authorityArgs, [
+      "app-server",
+      "--remote-control",
+      "--listen",
+      `unix://${composed.socketPath}`,
+    ]);
+  } finally {
+    if (originalAppDir == null) delete process.env.CODEX_LINUX_APP_DIR;
+    else process.env.CODEX_LINUX_APP_DIR = originalAppDir;
+    if (originalCli == null) delete process.env.CODEX_CLI_PATH;
+    else process.env.CODEX_CLI_PATH = originalCli;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("injected transport fails closed for missing, malformed, symlinked, or wrong-owner Desktop markers", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-app-server-remote-marker-validation-"));
+  const markerPath = path.join(
+    tempDir,
+    ".codex-linux",
+    "desktop-app-server-remote-control-enabled",
+  );
+  const socketPath = path.join(tempDir, "app-server.sock");
+  const expected = ["app-server", "--listen", `unix://${socketPath}`];
+  const originalAppDir = process.env.CODEX_LINUX_APP_DIR;
+  process.env.CODEX_LINUX_APP_DIR = tempDir;
+
+  try {
+    const { Transport } = loadInjectedTransport();
+    assert.deepEqual(Array.from(new Transport(socketPath).authorityArgs()), expected, "missing marker");
+
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, "version=2\nowner=desktop\n", "utf8");
+    assert.deepEqual(Array.from(new Transport(socketPath).authorityArgs()), expected, "malformed marker");
+
+    const markerTarget = path.join(tempDir, "marker-target");
+    fs.writeFileSync(markerTarget, "version=1\nowner=desktop\n", "utf8");
+    fs.unlinkSync(markerPath);
+    fs.symlinkSync(markerTarget, markerPath);
+    assert.deepEqual(Array.from(new Transport(socketPath).authorityArgs()), expected, "symlinked marker");
+
+    fs.unlinkSync(markerPath);
+    fs.writeFileSync(markerPath, "version=1\nowner=desktop\n", "utf8");
+    const wrongOwnerFs = {
+      ...fs,
+      lstatSync(candidate, ...args) {
+        const stat = fs.lstatSync(candidate, ...args);
+        if (candidate !== markerPath) return stat;
+        return new Proxy(stat, {
+          get(target, property, receiver) {
+            if (property === "uid") return process.getuid() + 1;
+            return Reflect.get(target, property, receiver);
+          },
+        });
+      },
+    };
+    const { Transport: WrongOwnerTransport } = loadInjectedTransport({ fsImpl: wrongOwnerFs });
+    assert.deepEqual(
+      Array.from(new WrongOwnerTransport(socketPath).authorityArgs()),
+      expected,
+      "wrong-owner marker",
+    );
+  } finally {
+    if (originalAppDir == null) delete process.env.CODEX_LINUX_APP_DIR;
+    else process.env.CODEX_LINUX_APP_DIR = originalAppDir;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("injected transport rejects an existing socket without unlinking it", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-app-server-existing-"));
   const socketPath = path.join(tempDir, "app-server.sock");
