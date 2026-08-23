@@ -12,7 +12,11 @@ proxy attaches to Desktop's existing authority instead of starting a separate
 app-server with a separate thread namespace.
 
 Desktop owns one selected Codex CLI child running `app-server --listen
-unix://PATH`. Desktop connects through the CLI's stock `app-server proxy --sock
+unix://PATH`. When `remote-mobile-control` has staged its exact Desktop marker,
+that same child instead runs `app-server --remote-control --listen unix://PATH`.
+The marker must be a same-user regular, non-symlink file with the expected
+content; an absent, unreadable, or malformed marker fails closed to the ordinary
+shared authority. Desktop connects through the CLI's stock `app-server proxy --sock
 PATH` byte tunnel and its existing WebSocket transport. Other local clients use
 the same stock proxy command to attach to the Unix socket and receive the normal
 WebSocket `/rpc` byte stream. Closing Desktop stops the authority.
