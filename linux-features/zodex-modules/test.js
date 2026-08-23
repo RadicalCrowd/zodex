@@ -93,11 +93,21 @@ function createWebviewTestEnvironment(statusPayload) {
     createElement(tag) {
       const attrs = new Map();
       const children = [];
+      let explicitText = "";
       const el = {
         tag,
         id: "",
         className: "",
-        textContent: "",
+        get textContent() {
+          if (explicitText) return explicitText;
+          if (children.length > 0) {
+            return children.map((c) => (typeof c === "string" ? c : c.textContent || "")).join(" ");
+          }
+          return "";
+        },
+        set textContent(v) {
+          explicitText = String(v);
+        },
         type: "",
         setAttribute(k, v) { attrs.set(k, v); },
         getAttribute(k) { return attrs.get(k); },
@@ -307,7 +317,7 @@ test("Scenario B: webview runtime displays warning-one and warning-two modals an
   assert.match(dialog1.children[0].children[0].textContent, /anthropic OAuth remains off/);
   assert.match(dialog1.children[0].children[1].textContent, new RegExp(ACKNOWLEDGEMENT_RISK));
 
-  // Test Active Banner when Enabled
+  // Test Active Warning Popup when Enabled
   const env2 = createWebviewTestEnvironment({
     ok: true,
     state: "valid",
@@ -322,7 +332,21 @@ test("Scenario B: webview runtime displays warning-one and warning-two modals an
   assert.equal(env2.getDialog(), null);
   const banner = env2.sandbox.document.getElementById("zodex-oauth-active");
   assert.notEqual(banner, null);
+  assert.match(banner.textContent, /Third-Party OAuth Active/);
   assert.match(banner.textContent, /omniroute\/anthropic/);
+  assert.equal(banner.children.length, 3); // header, body p, footer
+  const header = banner.children[0];
+  const footer = banner.children[2];
+  assert.equal(header.className, "zodex-oauth-active-header");
+  assert.equal(footer.className, "zodex-oauth-active-footer");
+  const xButton = header.children[1];
+  const closeButton = footer.children[0];
+  assert.equal(typeof xButton._onClick, "function");
+  assert.equal(typeof closeButton._onClick, "function");
+
+  // Clicking close removes popup
+  closeButton._onClick();
+  assert.equal(env2.sandbox.document.getElementById("zodex-oauth-active"), null);
 });
 
 // -----------------------------------------------------------------------------

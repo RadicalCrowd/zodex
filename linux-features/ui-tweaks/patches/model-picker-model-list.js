@@ -236,7 +236,7 @@ function applyInlineModelListPatch(source, context = {}) {
       `(0,${jsxNamespace}.jsx)(${menuNamespace}.Title,{children:${config}.model.label}),` +
       `(0,${jsxNamespace}.jsx)(\`div\`,{className:` +
       "`vertical-scroll-fade-mask flex max-h-[250px] flex-col overflow-y-auto`" +
-      `,children:${config}.model.options.map(${optionRenderer})})]})` +
+      `,children:typeof zodexRenderGroupedModelOptions!=="undefined"?zodexRenderGroupedModelOptions(${jsxNamespace},${config}.model.options,${optionRenderer},${menuNamespace}):${config}.model.options.map(${optionRenderer})})]})` +
       `/*${INLINE_MODEL_LIST_RUNTIME_MARKER}*/`;
     const replacement =
       `${prefix}${result};${cache}[${modelIndex}]!==${config}.model||` +
