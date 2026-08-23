@@ -127,7 +127,7 @@ function syntheticCurrentMainBundle() {
     'let i=require("node:path"),o=require("node:fs"),s=require("node:crypto"),h=require("node:child_process"),b={createRequire:()=>()=>({})};',
     "function mz(e){return Buffer.from(JSON.stringify({domain:`codex-device-key-sign-payload/v1`,payload:e}),`utf8`)}",
     "var lz=(0,b.createRequire)(__filename),uz=`remote-control-device-key.node`,dz=`codex-device-key-sign-payload/v1`;",
-    "function pz({resourcesPath:e}){let t=null,n=()=>{if(process.platform!==`darwin`)throw Error(`Remote control device keys are only available on macOS`);if(e==null)throw Error(`Remote control device keys require resourcesPath`);return t??=lz((0,i.join)(e,`native`,uz)),t};return{createDeviceKey:e=>n().createDeviceKey(e??`hardware_only`),deleteDeviceKey:e=>n().deleteDeviceKey(e),getDeviceKeyPublic:e=>n().getDeviceKeyPublic(e),signDeviceKey:async(e,t)=>{let r=mz(t);return{...await n().signDeviceKey(e,r),signedPayloadBase64:r.toString(`base64`)}}}}",
+    "function pz({resourcesPath:e}){let t=null,n=()=>{if(process.platform!==`darwin`&&process.platform!==`win32`)throw Error(`Remote control device keys are only available on macOS and Windows`);if(e==null)throw Error(`Remote control device keys require resourcesPath`);return t??=lz((0,i.join)(e,`native`,uz)),t};return{createDeviceKey:e=>n().createDeviceKey(e??`hardware_only`),deleteDeviceKey:e=>n().deleteDeviceKey(e),getDeviceKeyPublic:e=>n().getDeviceKeyPublic(e),signDeviceKey:async(e,t)=>{let r=mz(t);return{...await n().signDeviceKey(e,r),signedPayloadBase64:r.toString(`base64`)}}}}",
     "async function vV({codexHome:e,hostConfig:n,logger:r=t.Jr()}){if(n.kind===`local`)try{await yV(i.default.join(e??t.Rr({hostConfig:n,preferWsl:t.Kr(n)}),_V))&&r.info(`Removed remote_control from config before app-server start`)}catch(e){r.warning(`Failed to remove remote_control before app-server start`,{safe:{},sensitive:{error:e}})}}",
   ].join("");
 }
@@ -331,6 +331,14 @@ function syntheticAppServerManagerSignalsBundle() {
   ].join("");
 }
 
+function syntheticCurrentAppServerManagerSignalsBundle() {
+  return [
+    "/*threadRuntimeStatus:e.threadRuntimeStatus t===`needs_resume`?n?.type===`active`*/",
+    "function Pl(e){return e}function h_(){return null}function ALt(){return null}function FLt(){return null}function kLt(){return null}function Wun({item:e}){return e}function um(e){return e}function eut(){return false}function Fm(){return null}function Pm(){}function hdn(){}function mdn(){return null}function Am(){}",
+    "function Ydn(e,t){let i={method:`turn/started`,params:{}};switch(i.method){case`turn/started`:{let{threadId:n,turn:r}=i.params,a=Pl(n);if(!t.threadStore.conversations.get(a)){e.logger.error(`Received turn/started for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}break}case`turn/completed`:{let{threadId:n,turn:r}=i.params,a=Pl(n);if(!t.threadStore.conversations.get(a)){hdn(e.getHostId(),n,r.id),t.unread.discardTurn(a,r.id),e.logger.error(`Received turn/completed for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}break}case`item/started`:{let{item:n,threadId:r,turnId:a,startedAtMs:o}=i.params,s=Pl(r);if(!t.threadStore.conversations.get(s)){e.logger.error(`Received item/started for unknown conversation`,{safe:{conversationId:s},sensitive:{}});break}break}case`item/completed`:{let{item:n,threadId:r,turnId:a,completedAtMs:o}=i.params,s=Pl(r);if(n.type===`commandExecution`&&t.itemStreamState.clearItemTerminalInputBuffer(s,n.id),!t.threadStore.conversations.get(s)){e.logger.error(`Received item/completed for unknown conversation`,{safe:{conversationId:s},sensitive:{}});break}break}}}",
+  ].join("");
+}
+
 function syntheticCompletedItemRecoveryBundle() {
   return [
     "class U{onNotification(e,t){let n={method:e,params:t};switch(n.method){case`item/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`item/completed`,n.params)}))break;",
@@ -342,6 +350,14 @@ function syntheticCompletedItemRecoveryBundle() {
     "if(e.type===`userMessage`){let t=Put(n.items,e.content,n.turnId,n.turnStartedAtMs,!1);if(t!=null){t.status=`accepted`,HI(n,FF({type:`steered`,id:e.id}));return}HI(n,s);return}",
     "if(e.type===`hookPrompt`){bP(n,s);return}",
     "yV(e)&&(n.firstTurnWorkItemStartedAtMs=n.firstTurnWorkItemStartedAtMs??Date.now()),!(e.type!==`subAgentActivity`&&(e.type!==`sleep`||t.mode!==`durable`)&&!LB(n,e.id,e.type))&&(e.type,bP(n,s))});break}}}}",
+  ].join("");
+}
+
+function syntheticCurrentCompletedItemRecoveryBundle() {
+  return [
+    "function Fm(e,t,n,r){return null}function eut(){return true}function Pm(){}",
+    "function current(e,t){let n={type:`agentMessage`,id:`assistant-1`},r={mode:`standard`},i={items:[]},l={id:n.id};eut(n)&&(i.firstTurnWorkItemStartedAtMs=i.firstTurnWorkItemStartedAtMs??Date.now()),!(n.type!==`subAgentActivity`&&(n.type!==`sleep`||r.mode!==`durable`)&&!Fm(i,n.id,n.type,e.logger))&&(n.type,Pm(i,l))}",
+    "case`item/completed`:item/agentMessage/delta;Item not found in turn state",
   ].join("");
 }
 
@@ -1108,6 +1124,20 @@ test("Linux remote-control device-key patch handles current minified aliases", (
   assert.equal(applyLinuxRemoteControlDeviceKeyPatch(patched), patched);
 });
 
+test("Linux remote-control device-key patch handles the current macOS-and-Windows guard", () => {
+  const source = syntheticCurrentMainBundle();
+  const patched = applyLinuxRemoteControlDeviceKeyPatch(source);
+
+  assert.match(
+    patched,
+    /if\(process\.platform===`linux`\)return codexLinuxRemoteControlDeviceKeyClient\(\);if\(process\.platform!==`darwin`&&process\.platform!==`win32`\)/,
+  );
+  const drifted = source.replace("remote-control-device-key.node", "remote-control-device-key-v2.node");
+  const { result, warnings } = captureWarnings(() => applyLinuxRemoteControlDeviceKeyPatch(drifted));
+  assert.equal(result, drifted);
+  assert.ok(warnings.some((warning) => warning.includes("device-key bundle needles")));
+});
+
 test("Linux remote-control device-key provider does not capture a function-local child-process alias", () => {
   const source = `function injectedFeature(){let __codexChild=require(\`node:child_process\`);return __codexChild}${syntheticMainBundle()}`;
   const patched = applyLinuxRemoteControlDeviceKeyPatch(source);
@@ -1847,7 +1877,10 @@ test("Linux remote mobile conversation hydration patch handles current app-serve
   assert.match(patched, /Queueing turn\/started for hydrating conversation/);
   assert.match(patched, /this\.upsertConversationFromThread\(t\)/);
   assert.match(patched, /this\.codexLinuxRemoteMobileInFlightHydrations\?\.delete\(d\)/);
-  assert.match(patched, /for\(let e of c\)this\.onNotification\(e\.method,e\.params\)/);
+  assert.match(
+    patched,
+    /for\(let codexLinuxRemoteMobileQueuedNotification of c\)this\.onNotification\(codexLinuxRemoteMobileQueuedNotification\.method,codexLinuxRemoteMobileQueuedNotification\.params\)/,
+  );
   assert.match(patched, /Queueing item\/started for hydrating conversation/);
   assert.match(patched, /Queueing item\/completed for hydrating conversation/);
   assert.match(patched, /Queueing turn\/completed for hydrating conversation/);
@@ -1857,6 +1890,30 @@ test("Linux remote mobile conversation hydration patch handles current app-serve
   assert.doesNotMatch(patched, /captureBrowserUseTurnRoute/);
   assert.doesNotMatch(patched, /releaseBrowserUseTurnRoute/);
   assert.equal(applyLinuxRemoteMobileConversationHydrationPatch(patched), patched);
+});
+
+test("Linux remote mobile conversation hydration patch handles the current split manager and thread-store shape", () => {
+  const source = syntheticCurrentAppServerManagerSignalsBundle();
+  const { result: patched, warnings } = captureWarnings(() =>
+    applyLinuxRemoteMobileConversationHydrationPatch(source),
+  );
+
+  assert.notEqual(patched, source);
+  assert.equal(warnings.length, 0);
+  assert.match(patched, /e\.codexLinuxRemoteMobilePendingNotifications\?\?=new Map/);
+  assert.match(patched, /t\.threadStore\.conversations\.get\(d\)/);
+  assert.match(patched, /e\.readThread\(d,\{includeTurns:!0\}\)/);
+  assert.match(patched, /t\.upsertConversationFromThread\(t\)/);
+  assert.match(
+    patched,
+    /for\(let codexLinuxRemoteMobileQueuedNotification of c\)e\.onNotification\(codexLinuxRemoteMobileQueuedNotification\.method,codexLinuxRemoteMobileQueuedNotification\.params\)/,
+  );
+  assert.equal(applyLinuxRemoteMobileConversationHydrationPatch(patched), patched);
+
+  const drifted = source.replace("t.threadStore.conversations.get(s)", "t.threadStore.conversations.has(s)");
+  const driftedResult = captureWarnings(() => applyLinuxRemoteMobileConversationHydrationPatch(drifted));
+  assert.equal(driftedResult.result.includes("Queueing item/started for hydrating conversation"), false);
+  assert.ok(driftedResult.warnings.some((warning) => warning.includes("unknown item/started needle")));
 });
 
 test("Linux remote mobile hydration skips turn ids before reading threads", () => {
@@ -2375,6 +2432,24 @@ test("remote mobile completed-item recovery restores a missing started item", ()
   assert.equal(behavior.missing.errors.length, 0);
   assert.equal(behavior.existing.errors.length, 0);
   assert.equal(behavior.wrongType.errors.length, 1);
+});
+
+test("remote mobile completed-item recovery handles the current logger-aware insertion tail", () => {
+  const source = syntheticCurrentCompletedItemRecoveryBundle();
+  const { result: patched, warnings } = captureWarnings(() =>
+    applyLinuxRemoteMobileCompletedItemRecoveryPatch(source),
+  );
+
+  assert.notEqual(patched, source);
+  assert.equal(warnings.length, 0);
+  assert.match(patched, /codexLinuxCompletedItemExists=i\.items\.some\(e=>e\.id===l\.id\)/);
+  assert.match(patched, /!Fm\(i,n\.id,n\.type,e\.logger\)\)return;Pm\(i,l\)/);
+  assert.equal(applyLinuxRemoteMobileCompletedItemRecoveryPatch(patched), patched);
+
+  const drifted = source.replace("n.type,e.logger", "n.type,e.log");
+  const driftedResult = captureWarnings(() => applyLinuxRemoteMobileCompletedItemRecoveryPatch(drifted));
+  assert.equal(driftedResult.result, drifted);
+  assert.ok(driftedResult.warnings.some((warning) => warning.includes("completed item recovery insertion point")));
 });
 
 test("Linux remote-control status guard skips slow remote SSH status reads", async () => {
