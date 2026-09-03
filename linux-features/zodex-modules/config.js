@@ -7,6 +7,8 @@ const CONFIG_VERSION = 1;
 const CONFIG_RELATIVE_PATH = path.join("zodex", "config.json");
 const ACKNOWLEDGEMENT_RISK = "zodex-oauth-risk-v1";
 const ACKNOWLEDGEMENT_EFFECTS = "zodex-oauth-effects-v1";
+const DEVELOPER_UPDATE_ACKNOWLEDGEMENT_SOURCE = "zodex-developer-update-source-v1";
+const DEVELOPER_UPDATE_ACKNOWLEDGEMENT_INSTALL = "zodex-developer-update-install-v1";
 const ACKNOWLEDGEMENTS = Object.freeze([
   ACKNOWLEDGEMENT_RISK,
   ACKNOWLEDGEMENT_EFFECTS,
@@ -14,9 +16,21 @@ const ACKNOWLEDGEMENTS = Object.freeze([
 const SECRET_KEY_PATTERN = /(?:api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret|credential|private[-_]?key)/iu;
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
 const BROKER_PROVIDERS = Object.freeze({
-  omniroute: new Set(["anthropic", "google"]),
+  omniroute: new Set(["anthropic", "google", "opencode", "kilo"]),
   "opencode-community": new Set(),
 });
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function configRevision(value) {
+  return require("node:crypto").createHash("sha256").update(stableJson(value)).digest("hex");
+}
 
 function isObject(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
@@ -71,10 +85,28 @@ function parseBroker(value, location, brokerId) {
   return { enabled: value.enabled, providers };
 }
 
+function parseDeveloperUpdates(value) {
+  if (!isObject(value)) throw new Error("config.developerUpdates must be an object");
+  assertKnownKeys(value, ["enabled", "acknowledgements"], "config.developerUpdates");
+  if (typeof value.enabled !== "boolean") throw new Error("config.developerUpdates.enabled must be a boolean");
+  if (!Array.isArray(value.acknowledgements) || value.acknowledgements.some((item) => typeof item !== "string")) {
+    throw new Error("config.developerUpdates.acknowledgements must be an array of strings");
+  }
+  const acknowledgements = [...new Set(value.acknowledgements)];
+  const allowed = [DEVELOPER_UPDATE_ACKNOWLEDGEMENT_SOURCE, DEVELOPER_UPDATE_ACKNOWLEDGEMENT_INSTALL];
+  const unknown = acknowledgements.find((item) => !allowed.includes(item));
+  if (unknown) throw new Error(`config.developerUpdates has unknown acknowledgement '${unknown}'`);
+  return {
+    enabled: value.enabled,
+    acknowledgements,
+    active: value.enabled && allowed.every((item) => acknowledgements.includes(item)),
+  };
+}
+
 function parseConfig(value) {
   if (!isObject(value)) throw new Error("config must be an object");
   assertNoSecrets(value);
-  assertKnownKeys(value, ["version", "oauth", "remoteControl"], "config");
+  assertKnownKeys(value, ["version", "oauth", "remoteControl", "developerUpdates"], "config");
   if (value.version !== CONFIG_VERSION) throw new Error(`config.version must be ${CONFIG_VERSION}`);
   if (!isObject(value.oauth)) throw new Error("config.oauth must be an object");
   assertKnownKeys(value.oauth, ["brokers"], "config.oauth");
@@ -95,6 +127,9 @@ function parseConfig(value) {
   if (!Array.isArray(value.remoteControl.extensions) || value.remoteControl.extensions.some((id) => !ID_PATTERN.test(id))) {
     throw new Error("config.remoteControl.extensions must be an array of module ids");
   }
+  const developerUpdates = value.developerUpdates == null
+    ? { enabled: false, acknowledgements: [], active: false }
+    : parseDeveloperUpdates(value.developerUpdates);
   return {
     version: CONFIG_VERSION,
     oauth: { brokers },
@@ -102,6 +137,7 @@ function parseConfig(value) {
       enabled: value.remoteControl.enabled,
       extensions: [...new Set(value.remoteControl.extensions)],
     },
+    developerUpdates,
   };
 }
 
@@ -116,12 +152,13 @@ function configPath(environment = process.env) {
 
 function readConfig(environment = process.env) {
   const file = configPath(environment);
-  if (!file || !fs.existsSync(file)) return { state: "missing", file, config: null };
+  if (!file || !fs.existsSync(file)) return { state: "missing", file, config: null, revision: "missing" };
   try {
     let text;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const before = fs.statSync(file);
+      const before = fs.lstatSync(file);
       if (!before.isFile()) throw new Error("config path is not a regular file");
+      if (before.isSymbolicLink()) throw new Error("config path must not be a symbolic link");
       if (before.size > 64 * 1024) throw new Error("config file exceeds 64 KiB");
       if (typeof process.getuid === "function" && before.uid !== process.getuid()) {
         throw new Error("config file is not owned by the current user");
@@ -130,7 +167,7 @@ function readConfig(environment = process.env) {
         throw new Error("config file permissions must be 0600");
       }
       text = fs.readFileSync(file, "utf8");
-      const after = fs.statSync(file);
+      const after = fs.lstatSync(file);
       if (
         before.ino === after.ino &&
         before.size === after.size &&
@@ -139,9 +176,11 @@ function readConfig(environment = process.env) {
       text = undefined;
     }
     if (text === undefined) throw new Error("config changed while it was being read; refresh again");
-    return { state: "valid", file, config: parseConfig(JSON.parse(text)) };
+    const config = parseConfig(JSON.parse(text));
+    return { state: "valid", file, config, revision: configRevision(config) };
   } catch (error) {
-    return { state: "invalid", file, config: null, error: error instanceof Error ? error.message : String(error) };
+    const message = error instanceof Error ? error.message : String(error);
+    return { state: "invalid", file, config: null, error: message, revision: `invalid-${configRevision(message)}` };
   }
 }
 
@@ -180,11 +219,14 @@ function brokerConnectionStates(config) {
 module.exports = {
   ACKNOWLEDGEMENT_EFFECTS,
   ACKNOWLEDGEMENT_RISK,
+  DEVELOPER_UPDATE_ACKNOWLEDGEMENT_INSTALL,
+  DEVELOPER_UPDATE_ACKNOWLEDGEMENT_SOURCE,
   CONFIG_VERSION,
   assertNoSecrets,
   brokerConnectionStates,
   configPath,
   connectionState,
+  configRevision,
   parseConfig,
   readConfig,
 };

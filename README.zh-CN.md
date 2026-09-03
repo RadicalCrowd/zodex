@@ -12,9 +12,12 @@
 ./scripts/build-zodex-arch-candidate.sh
 ```
 
-在 updater 的所有路径和服务完成独立命名空间之前，Zodex 会刻意省略 updater。
-Provider 凭据不会写入 Zodex JSON 配置。详情请参阅
-[`linux-features/zodex-modules/README.md`](linux-features/zodex-modules/README.md)。
+Zodex 会刻意省略继承的 updater。可选且默认关闭的
+`zodex-developer-updater` 使用完全独立的命名空间，只从所有者配置的本地
+checkout 构建隔离 Arch 候选，不会修改 checkout 或重启应用。Provider 凭据不会
+写入 Zodex JSON 配置。详情请参阅
+[`linux-features/zodex-modules/README.md`](linux-features/zodex-modules/README.md)
+和 [`linux-features/zodex-developer-updater/README.md`](linux-features/zodex-developer-updater/README.md)。
 
 ## 上游 Linux port 文档
 

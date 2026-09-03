@@ -13,10 +13,13 @@ or restarting the current app:
 ./scripts/build-zodex-arch-candidate.sh
 ```
 
-The updater is deliberately omitted until all updater paths and services are
-separately namespaced. Provider authentication and secrets are never stored in
-the Zodex JSON configuration. See
-[`linux-features/zodex-modules/README.md`](linux-features/zodex-modules/README.md).
+The inherited updater is deliberately omitted. The optional,
+disabled-by-default `zodex-developer-updater` feature is fully namespaced and
+builds isolated Arch candidates only from an owner-configured local checkout;
+it never changes that checkout or restarts the app. Provider authentication and
+secrets are never stored in the Zodex JSON configuration. See
+[`linux-features/zodex-modules/README.md`](linux-features/zodex-modules/README.md)
+and [`linux-features/zodex-developer-updater/README.md`](linux-features/zodex-developer-updater/README.md).
 
 ## Upstream Linux-port documentation
 

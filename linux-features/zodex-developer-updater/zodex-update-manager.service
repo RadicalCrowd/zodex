@@ -1,0 +1,12 @@
+[Unit]
+Description=Zodex Developer Update Manager
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/zodex-update-manager daemon
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

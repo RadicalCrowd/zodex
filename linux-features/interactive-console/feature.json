@@ -1,0 +1,9 @@
+{
+  "id": "interactive-console",
+  "displayName": "Interactive Console & Remote Terminal",
+  "description": "Interactive bottom console dock with live streaming PTY, sudo password intervention, and mobile remote control mirroring.",
+  "defaultEnabled": false,
+  "entrypoints": {
+    "patchDescriptors": "./patch.js"
+  }
+}

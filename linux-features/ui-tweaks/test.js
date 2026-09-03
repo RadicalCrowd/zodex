@@ -180,6 +180,7 @@ test("ui-tweaks is discoverable and disabled until listed in features.json", () 
           "webview-asset",
           "optional",
         ],
+        ["feature:ui-tweaks:model-picker-groups-runtime", "webview-asset", "optional"],
         ["feature:ui-tweaks:reasoning-effort-labels-english", "webview-asset", "optional"],
         ["feature:ui-tweaks:appearance-dock-icon-main-process", "main-bundle", "optional"],
         ["feature:ui-tweaks:appearance-dock-icon-settings-row", "webview-asset", "optional"],
@@ -192,7 +193,7 @@ test("ui-tweaks is discoverable and disabled until listed in features.json", () 
     const modelPickerDescriptors = descriptors.filter((descriptor) =>
       descriptor.id.includes(":model-picker-"),
     );
-    assert.equal(modelPickerDescriptors.length, 3);
+    assert.equal(modelPickerDescriptors.length, 4);
     assert.ok(
       modelPickerDescriptors.every((descriptor) => typeof descriptor.enabled === "function"),
     );
@@ -745,4 +746,42 @@ test("unsafe styles warn, stay scoped, and fall back to the default", () => {
   assert.equal(value.includes(unsafeStyle), false);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /^WARN: ui-tweaks sidebar project name style must be a safe CSS declaration list/);
+});
+
+const {
+  classifyModelGroup,
+  groupModelOptions,
+  applyModelPickerGroupsPatch,
+  MODEL_PICKER_GROUPS_RUNTIME_MARKER,
+} = require("./patches/model-picker-groups.js");
+
+test("model picker groups classifies models correctly by provider prefix", () => {
+  assert.equal(classifyModelGroup({ id: "antigravity/gemini-3.7-flash" }), "OmniRoute / Antigravity");
+  assert.equal(classifyModelGroup({ id: "omniroute/claude-sonnet-4-6" }), "OmniRoute / Antigravity");
+  assert.equal(classifyModelGroup({ id: "gpt-5.6-sol" }), "OpenAI Native");
+  assert.equal(classifyModelGroup({ id: "kilo-free/step-3.7-flash", description: "[kiloFree] Step 3.7 Flash" }), "Kilo Free");
+  assert.equal(classifyModelGroup({ id: "opencode-free/mimo-v2.5-free", description: "[OpencodeFree] Mimo Free" }), "OpenCode Free");
+  assert.equal(classifyModelGroup({ id: "claude-3-opus" }), "Anthropic Claude");
+  assert.equal(classifyModelGroup({ id: "gemini-1.5-pro" }), "Google Gemini");
+});
+
+test("groupModelOptions buckets non-empty categories into ordered list", () => {
+  const models = [
+    { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    { id: "antigravity/gemini-3.7-flash", label: "Gemini 3.7 Flash" },
+    { id: "kilo-free/cohere", label: "Cohere", description: "[kiloFree]" },
+  ];
+  const grouped = groupModelOptions(models);
+  assert.equal(grouped.length, 3);
+  assert.equal(grouped[0].name, "OmniRoute / Antigravity");
+  assert.equal(grouped[1].name, "OpenAI Native");
+  assert.equal(grouped[2].name, "Kilo Free");
+});
+
+test("applyModelPickerGroupsPatch injects runtime into model menu bundle", () => {
+  const fixture = '"use strict";const options={};function menu(){return config.options.map(renderOption);}';
+  const patched = applyModelPickerGroupsPatch(fixture);
+  assert.match(patched, new RegExp(MODEL_PICKER_GROUPS_RUNTIME_MARKER));
+  assert.match(patched, /zodexClassifyModelGroup/);
+  assert.match(patched, /zodexRenderGroupedModelOptions/);
 });

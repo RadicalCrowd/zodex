@@ -28,6 +28,9 @@
     "modelPicker": {
       "showModelsByDefault": {
         "enabled": false
+      },
+      "groupedModels": {
+        "enabled": false
       }
     },
     "reasoning": {

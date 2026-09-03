@@ -1,0 +1,9 @@
+{
+  "id": "sidebar-chat-subfolders",
+  "displayName": "Sidebar Chat Subfolders",
+  "description": "Organize project chats into collapsible client-side subfolders with agent-driven folder creation support.",
+  "defaultEnabled": false,
+  "entrypoints": {
+    "patchDescriptors": "./patch.js"
+  }
+}

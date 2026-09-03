@@ -1,0 +1,12 @@
+{
+  "id": "zodex-developer-updater",
+  "title": "Zodex Developer Updater",
+  "description": "Opt-in, namespaced developer snapshot updater for Zodex Arch packages.",
+  "defaultEnabled": false,
+  "packageResources": [
+    { "source": "zodex-update-manager.cjs", "target": "usr/lib/zodex/zodex-update-manager.cjs", "mode": "0644", "formats": ["pacman"] },
+    { "source": "zodex-update-manager", "target": "usr/bin/zodex-update-manager", "mode": "0755", "formats": ["pacman"] },
+    { "source": "zodex-update-manager.service", "target": "usr/lib/systemd/user/zodex-update-manager.service", "mode": "0644", "formats": ["pacman"] }
+  ],
+  "packageDependencies": { "pacman": ["nodejs", "polkit" ] }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "zodex-terminal-console",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "defaultEnabled": false,
+  "capabilities": [
+    "remote-control.status:read",
+    "remote-control.terminal:stream",
+    "remote-control.action:send-input"
+  ],
+  "entrypoint": "./pty-manager.js"
+}

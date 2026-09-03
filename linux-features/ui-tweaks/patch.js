@@ -5,6 +5,7 @@ const modelPickerModelList = require("./patches/model-picker-model-list.js");
 const reasoningEffortLabels = require("./patches/reasoning-effort-labels.js");
 const dockIcon = require("./patches/dock-icon.js");
 const suggestedPrompts = require("./patches/suggested-prompts.js");
+const modelPickerGroups = require("./patches/model-picker-groups.js");
 
 function patchesFrom(...modules) {
   return modules.flatMap((moduleExports) =>
@@ -16,6 +17,7 @@ module.exports = {
   descriptors: patchesFrom(
     sidebarProjectName,
     modelPickerModelList,
+    modelPickerGroups,
     reasoningEffortLabels,
     dockIcon,
     suggestedPrompts,

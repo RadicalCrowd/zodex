@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec node /usr/lib/zodex/zodex-update-manager.cjs "$@"
