@@ -94,6 +94,13 @@ test("InRelease verification accepts the signing key and rejects tampering or a 
 
   const payload = verifyInRelease(inReleasePath, signer.keyPath, signer.fingerprint);
   assert.equal(parseReleaseSha256(payload).size, 1);
+  const compositeKey = path.join(root, "composite.gpg");
+  fs.writeFileSync(compositeKey, Buffer.concat([fs.readFileSync(signer.keyPath), fs.readFileSync(wrong.keyPath)]));
+  assert.throws(
+    () => verifyInRelease(inReleasePath, compositeKey, wrong.fingerprint),
+    /signer fingerprint mismatch/,
+    "an attacker key in a composite keyring must not become the trust root",
+  );
   assert.throws(() => verifyInRelease(inReleasePath, wrong.keyPath, signer.fingerprint), /expected fingerprint/);
   assert.throws(() => verifyInRelease(inReleasePath, wrong.keyPath, wrong.fingerprint), /signature verification failed/);
 

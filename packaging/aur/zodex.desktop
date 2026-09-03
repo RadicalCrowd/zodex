@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Zodex
+Comment=Arch-first Codex Desktop integration
+Exec=/usr/bin/zodex-desktop %U
+Icon=zodex
+Terminal=false
+Type=Application
+Categories=Development;
+StartupWMClass=Zodex

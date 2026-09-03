@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+state_root="${ZODEX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/zodex}"
+export ZODEX_CONTROL_SOCKET="${ZODEX_CONTROL_SOCKET:-$state_root/run/control-v1.sock}"
+exec /opt/zodex/start.sh "$@"

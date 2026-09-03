@@ -18,6 +18,27 @@ separately namespaced. Provider authentication and secrets are never stored in
 the Zodex JSON configuration. See
 [`linux-features/zodex-modules/README.md`](linux-features/zodex-modules/README.md).
 
+## Zodex local control plane (redesign)
+
+The redesign adds two open-source binaries, `zodex` and
+`zodex-control-plane`. The CLI is a thin client around a user-supplied native
+Codex binary; it never bundles or reads native authentication. The Control
+Plane runs in a dedicated private tmux server, keeps managed agents in opaque
+sessions, and stores conversation records with AES-256-GCM using an
+OS-keyring-held installation key. Missing or locked keyring state fails closed.
+
+Build the isolated binaries with:
+
+```bash
+cargo build --release -p zodex-cli -p zodex-control-plane
+```
+
+The supported local workflow is `zodex init`, `zodex status`, `zodex doctor`,
+`zodex inventory`, `zodex profile validate`, `zodex run --synthetic-task`,
+`zodex panic --confirm`, `zodex recover`, `zodex export`, `zodex import`, and
+`zodex support-bundle`. Provider-backed turns, catalog migration, package
+promotion, publication, and the final Desktop restart remain separately gated.
+
 ## Upstream Linux-port documentation
 
 <h1 align="center">ChatGPT Community for Linux</h1>
@@ -264,6 +285,7 @@ requirements, known limitations, configuration, and tests.
 | `remote-mobile-control` | Experimental Linux remote-host and outbound-control flows | [Docs](linux-features/remote-mobile-control/README.md) |
 | `shallow-repository-watches` | Avoid recursive main-thread walks for transient repository previews | [Docs](linux-features/shallow-repository-watches/README.md) |
 | `shared-app-server-socket` | Share one protocol-transparent Unix app-server socket | [Docs](linux-features/shared-app-server-socket/README.md) |
+| `zodex-control-plane-view` | Optional read-only Control Plane status in Desktop | [Docs](linux-features/zodex-control-plane-view/README.md) |
 | `thorium-chrome-plugin` | Add Thorium to the official bundled Chrome integration | [Docs](linux-features/thorium-chrome-plugin/README.md) |
 | `ui-tweaks` | Optional visual and interaction customizations | [Docs](linux-features/ui-tweaks/README.md) |
 

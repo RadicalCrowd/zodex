@@ -83,19 +83,22 @@ function selectChatgptPackage(source, architecture) {
   if (!/^pool\/[A-Za-z0-9._+\/-]+\.deb$/.test(entry.Filename ?? "")) throw new Error("Unsafe chatgpt Filename in Packages");
   if (!/^[0-9a-f]{64}$/i.test(entry.SHA256 ?? "")) throw new Error("Invalid chatgpt SHA256 in Packages");
   if (!/^\d+$/.test(entry.Size ?? "")) throw new Error("Invalid chatgpt Size in Packages");
+  const size = Number(entry.Size);
+  if (!Number.isSafeInteger(size)) throw new Error("Invalid chatgpt Size in Packages");
   return {
     package: entry.Package,
     version: entry.Version,
     architecture: entry.Architecture,
     repositoryPath: entry.Filename,
     sha256: entry.SHA256.toLowerCase(),
-    size: Number(entry.Size),
+    size,
     depends: entry.Depends ?? "",
   };
 }
 
 function verifyIndexedFile(filePath, expected, label) {
-  const stat = fs.statSync(filePath);
+  const stat = fs.lstatSync(filePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`${label} must be a regular non-symlink file`);
   if (stat.size !== expected.size) {
     throw new Error(`${label} size mismatch: expected ${expected.size}, got ${stat.size}`);
   }
@@ -106,7 +109,9 @@ function verifyIndexedFile(filePath, expected, label) {
 }
 
 async function download(url, destination) {
-  const response = await fetch(url, { redirect: "follow" });
+  // The signed repository URL is the trust root; following an HTTP redirect
+  // would permit an unrelated host to supply an otherwise hash-valid fixture.
+  const response = await fetch(url, { redirect: "error" });
   if (!response.ok) throw new Error(`Download failed (${response.status}) for ${url}`);
   const bytes = Buffer.from(await response.arrayBuffer());
   fs.writeFileSync(destination, bytes, { mode: 0o600 });
@@ -129,10 +134,24 @@ function verifySigningKey(keyPath, expectedFingerprint = EXPECTED_FINGERPRINT) {
 function verifyInRelease(inReleasePath, keyPath, expectedFingerprint = EXPECTED_FINGERPRINT) {
   verifySigningKey(keyPath, expectedFingerprint);
   const result = childProcess.spawnSync(
-    "gpgv", ["--keyring", keyPath, inReleasePath],
+    "gpgv", ["--status-fd", "1", "--keyring", keyPath, inReleasePath],
     { encoding: "utf8" },
   );
   if (result.status !== 0) throw new Error(`InRelease signature verification failed: ${result.stderr.trim()}`);
+  const validSigners = result.stdout
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("[GNUPG:] VALIDSIG "))
+    .map((line) => {
+      const fields = line.split(/\s+/);
+      return { signer: fields[2], primary: fields[12] };
+    })
+    .filter(({ signer }) => Boolean(signer));
+  const expected = expectedFingerprint.toUpperCase();
+  if (validSigners.length !== 1 || ![validSigners[0].signer, validSigners[0].primary]
+    .filter(Boolean)
+    .some((fingerprint) => fingerprint.toUpperCase() === expected)) {
+    throw new Error(`InRelease signer fingerprint mismatch: expected ${expectedFingerprint}`);
+  }
   return extractClearSignedPayload(fs.readFileSync(inReleasePath, "utf8"));
 }
 

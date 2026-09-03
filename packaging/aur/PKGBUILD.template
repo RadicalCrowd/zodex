@@ -1,0 +1,46 @@
+# Maintainer: RadicalCrowd Zodex Maintainers
+pkgname=zodex
+pkgver=__PKGVER__
+pkgrel=1
+pkgdesc='Arch-first Codex Desktop integration and local agent control plane (BYOB)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/RadicalCrowd/zodex'
+license=('MIT')
+depends=('tmux' 'libsecret' 'nodejs' 'polkit' 'xdg-utils' 'gtk3' 'nss' 'alsa-lib')
+makedepends=('cargo' 'dpkg' 'gnupg' 'nodejs')
+options=('!strip')
+source=('zodex-source.tar.gz')
+sha256sums=('__SOURCE_SHA256__')
+
+prepare() {
+  : "${ZODEX_OFFICIAL_DEB:?Set ZODEX_OFFICIAL_DEB to the owner-supplied official ChatGPT .deb}"
+  : "${ZODEX_BYOB_EVIDENCE_DIR:?Set ZODEX_BYOB_EVIDENCE_DIR to signed APT evidence}"
+  node "$srcdir/zodex-source/scripts/verify-zodex-byob.js" \
+    --deb "$ZODEX_OFFICIAL_DEB" \
+    --evidence "$ZODEX_BYOB_EVIDENCE_DIR"
+  printf '%s\n' '{"enabled":["zodex-control-plane-view"]}' > "$srcdir/features.json"
+}
+
+build() {
+  cd "$srcdir/zodex-source"
+  cargo build --release --locked -p zodex-cli -p zodex-control-plane
+  CODEX_INSTALL_TRANSACTION_ACTIVE=1 \
+  CODEX_APP_ID=zodex \
+  CODEX_APP_DISPLAY_NAME=Zodex \
+  CODEX_INSTALL_DIR="$srcdir/zodex-app" \
+  CODEX_LINUX_FEATURES_CONFIG="$srcdir/features.json" \
+    ./install.sh "$ZODEX_OFFICIAL_DEB"
+}
+
+package() {
+  cd "$srcdir/zodex-source"
+  install -d "$pkgdir/opt/zodex" "$pkgdir/usr/bin" "$pkgdir/usr/lib/zodex" \
+    "$pkgdir/usr/share/applications" "$pkgdir/usr/share/icons/hicolor/512x512/apps"
+  cp -a --no-preserve=ownership "$srcdir/zodex-app/." "$pkgdir/opt/zodex/"
+  install -Dm755 target/release/zodex "$pkgdir/usr/bin/zodex"
+  install -Dm755 target/release/zodex-control-plane "$pkgdir/usr/lib/zodex/zodex-control-plane"
+  install -Dm644 assets/zodex.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/zodex.png"
+  install -Dm755 packaging/aur/zodex-desktop "$pkgdir/usr/bin/zodex-desktop"
+  install -Dm644 packaging/aur/zodex.desktop "$pkgdir/usr/share/applications/zodex.desktop"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/zodex/LICENSE"
+}

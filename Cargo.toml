@@ -5,5 +5,7 @@ members = [
   "read-aloud-linux",
   "updater",
   "record-replay-linux",
+  "zodex-cli",
+  "zodex-control-plane",
 ]
 resolver = "2"

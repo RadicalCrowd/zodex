@@ -16,6 +16,16 @@
 Provider 凭据不会写入 Zodex JSON 配置。详情请参阅
 [`linux-features/zodex-modules/README.md`](linux-features/zodex-modules/README.md)。
 
+## Zodex 本地 Control Plane（重设计）
+
+重设计新增开源的 `zodex` 与 `zodex-control-plane`。CLI 仅包装用户提供的
+原生 Codex，不捆绑或读取原生认证；Control Plane 在独立私有 tmux 服务中运行，
+并使用操作系统密钥环持有的 AES-256-GCM 安装密钥加密会话内容。密钥环不可用或
+被锁定时会安全拒绝受保护操作。可用流程包括 `zodex status`、`doctor`、
+`inventory`、`profile validate`、`run --synthetic-task`、`panic`、`recover`、
+`export`、`import` 和 `support-bundle`。实时 provider 调用、迁移、发布与最终重启
+仍需单独授权。
+
 ## 上游 Linux port 文档
 
 <h1 align="center">ChatGPT Community for Linux</h1>

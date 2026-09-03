@@ -1,0 +1,9 @@
+{
+  "id": "zodex-control-plane-view",
+  "title": "Zodex Control Plane View",
+  "description": "Read-only Desktop view of sanitized Zodex-managed agent lifecycle state.",
+  "defaultEnabled": false,
+  "entrypoints": {
+    "patchDescriptors": "./patch.js"
+  }
+}
